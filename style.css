@@ -103,3 +103,37 @@
  .touch-drive button{width:105px;height:84px}
  .touch-controls .steer-btn{width:88px!important;height:88px!important}
 }
+
+
+/* V9.8 MOBILE FULLSCREEN / RESPONSIVE HOTFIX
+   Do not trap the player behind the rotate screen when fullscreen is active. */
+#rotateNotice.fullscreen-active{display:none!important}
+html[data-fullscreen="1"] #rotateNotice{display:none!important}
+@media (orientation:portrait) and (max-width:1100px){
+  html[data-fullscreen="0"] #rotateNotice{display:grid!important}
+  html[data-fullscreen="0"] body>#app,
+  html[data-fullscreen="0"] body>#termsGate,
+  html[data-fullscreen="0"] body>#authPanel{visibility:hidden}
+}
+@media (pointer:coarse) and (orientation:portrait){
+  /* If the browser cannot rotate the device, the game remains playable rather than freezing. */
+  html[data-fullscreen="1"] #game{display:block!important;visibility:visible!important}
+  html[data-fullscreen="1"] .race-top{padding:8px 10px;font-size:10px}
+  html[data-fullscreen="1"] .score{left:8px;top:42px;transform:scale(.58);transform-origin:top left;max-height:42vh}
+  html[data-fullscreen="1"] .race-player{width:145px;min-height:28px;grid-template-columns:16px 24px 1fr;gap:4px;padding:3px 5px}
+  html[data-fullscreen="1"] .race-player img{width:22px;height:22px}
+  html[data-fullscreen="1"] .race-player b{font-size:8px}
+  html[data-fullscreen="1"] .mini{width:105px;height:62px;right:8px;top:42px}
+  html[data-fullscreen="1"] .touch-controls{display:flex;left:10px;bottom:10px;gap:7px}
+  html[data-fullscreen="1"] .touch-controls .steer-btn{width:78px!important;height:78px!important;font-size:34px!important}
+  html[data-fullscreen="1"] .touch-controls #touchDrift{width:76px!important;height:70px!important}
+  html[data-fullscreen="1"] .touch-drive{display:flex;right:10px;bottom:10px;gap:7px}
+  html[data-fullscreen="1"] .touch-drive button{width:92px;height:78px;font-size:12px}
+  html[data-fullscreen="1"] .touch-actions{display:flex;right:10px;bottom:96px;gap:7px}
+  html[data-fullscreen="1"] .touch-actions button{width:78px!important;height:52px!important}
+  html[data-fullscreen="1"] .speed-box{right:8px;bottom:8px;transform:scale(.62);transform-origin:bottom right}
+  html[data-fullscreen="1"] .energy{left:8px;bottom:96px;width:150px;transform:scale(.72);transform-origin:bottom left}
+  html[data-fullscreen="1"] .race-exit{display:block;right:8px;top:8px;bottom:auto;font-size:9px}
+}
+#rotateFullscreen.fullscreen-failed{animation:fullscreenRetry 1.1s ease-in-out 2}
+@keyframes fullscreenRetry{50%{transform:scale(1.025);filter:brightness(1.2)}}
