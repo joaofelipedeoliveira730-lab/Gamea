@@ -19,9 +19,31 @@ const pool=new Pool({
   ssl:process.env.NODE_ENV==="production"?{rejectUnauthorized:false}:false
 });
 
+async function initDatabase(){
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS players (
+      id BIGSERIAL PRIMARY KEY,
+      nickname VARCHAR(18) NOT NULL UNIQUE,
+      skill_points INTEGER NOT NULL DEFAULT 1000,
+      wins INTEGER NOT NULL DEFAULT 0,
+      kills INTEGER NOT NULL DEFAULT 0,
+      games INTEGER NOT NULL DEFAULT 0,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    );
+    CREATE INDEX IF NOT EXISTS players_skill_points_idx
+      ON players(skill_points DESC);
+  `);
+}
+
+
 app.get("/health",async(_,res)=>{
-  try{await pool.query("SELECT 1");res.json({ok:true,service:"NEON PATH",database:"ok"})}
-  catch(e){res.status(503).json({ok:false,database:"error"})}
+  try{
+    await pool.query("SELECT 1 FROM players LIMIT 1");
+    res.json({ok:true,service:"NEON PATH",database:"ok"});
+  }catch(e){
+    res.status(503).json({ok:false,service:"NEON PATH",database:"error"});
+  }
 });
 
 app.get("/api/leaderboard",async(_,res)=>{
@@ -268,4 +290,9 @@ setInterval(()=>{
   }
 },60000);
 
-server.listen(PORT,()=>console.log(`NEON PATH on :${PORT}`));
+initDatabase()
+  .then(()=>server.listen(PORT,()=>console.log(`NEON PATH on :${PORT}`)))
+  .catch(err=>{
+    console.error("DATABASE INIT FAILED:",err);
+    process.exit(1);
+  });

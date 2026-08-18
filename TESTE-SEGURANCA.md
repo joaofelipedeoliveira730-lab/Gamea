@@ -37,3 +37,8 @@ Resultado automático: **17/17 verificações passaram**.
 3. Limitar frequência e tamanho das mensagens.
 4. Registrar eventos relevantes para futura auditoria.
 5. Em produção, adicionar tabela de partidas/eventos, identificação de desconexões anormais e revisão automática de partidas suspeitas.
+
+## Correção PostgreSQL
+- O servidor cria automaticamente a tabela `players` e o índice na inicialização.
+- `/health` agora verifica a tabela `players`, não apenas a conexão TCP com o PostgreSQL.
+- O servidor só começa a aceitar partidas depois que a inicialização do banco termina com sucesso.
