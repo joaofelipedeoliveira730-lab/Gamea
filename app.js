@@ -59,24 +59,35 @@ preloadResources(quality);
 let authToken=localStorage.getItem("neon_token")||"";
 const API_BASE="";
 async function api(path,opts={}){const headers={"Content-Type":"application/json",...(opts.headers||{})};if(authToken)headers.Authorization="Bearer "+authToken;const r=await fetch(API_BASE+path,{...opts,headers});const j=await r.json().catch(()=>({}));if(!r.ok)throw new Error(j.error||"erro");return j;}
+function setAuthMode(mode){
+  const login=mode==="login";
+  $("loginForm").classList.toggle("hidden",!login);
+  $("registerForm").classList.toggle("hidden",login);
+  $("authMsg").textContent="";
+}
 async function auth(mode){
-  const nick=document.getElementById("authNick").value.trim();
-  const email=document.getElementById("authEmail").value.trim();
-  const password=document.getElementById("authPassword").value;
-  const msg=document.getElementById("authMsg");
+  const msg=$("authMsg");
+  const nick=mode==="login" ? $("authNick").value.trim() : $("registerNick").value.trim();
+  const password=mode==="login" ? $("authPassword").value : $("registerPassword").value;
+  const email=mode==="register" ? $("registerEmail").value.trim() : "";
+  if(!nick || !password){msg.textContent="Preencha apelido e senha.";return;}
   try{
-    const data=await api(mode==="login"?"/api/auth/login":"/api/auth/register",{method:"POST",body:JSON.stringify({username:nick,email,password})});
+    const body=mode==="register" ? {username:nick,password,email:email||null} : {username:nick,password};
+    const data=await api(mode==="login"?"/api/auth/login":"/api/auth/register",{method:"POST",body:JSON.stringify(body)});
     authToken=data.token||data.accessToken||authToken;
     if(authToken)localStorage.setItem("neon_token",authToken);
     msg.textContent="CONEXÃO ESTABELECIDA";
+    $("authPanel").hidden=true;
+    $("app").hidden=false;
     await renderProfile();
   }catch(e){msg.textContent="Não foi possível entrar: "+e.message;}
 }
 async function renderProfile(){
   try{
     const p=await api("/api/profile");
-    document.getElementById("profilePanel").hidden=false;
-    document.getElementById("authPanel").hidden=true;
+    $("profilePanel").hidden=true;
+    $("authPanel").hidden=true;
+    $("app").hidden=false;
     document.getElementById("profileLevel").textContent=p.level;
     document.getElementById("profilePrestige").textContent="PRESTÍGIO "+p.prestige;
     document.getElementById("xpText").textContent="XP "+p.xp;
@@ -85,8 +96,11 @@ async function renderProfile(){
     document.querySelectorAll("[data-character]").forEach(b=>b.onclick=async()=>{try{await api("/api/profile/character",{method:"POST",body:JSON.stringify({characterId:Number(b.dataset.character)})});await renderProfile();}catch(e){}});
   }catch(e){}
 }
-document.getElementById("loginBtn")?.addEventListener("click",()=>auth("login"));
-document.getElementById("registerBtn")?.addEventListener("click",()=>auth("register"));
+$("loginBtn")?.addEventListener("click",()=>auth("login"));
+$("registerBtn")?.addEventListener("click",()=>auth("register"));
+$("toRegister")?.addEventListener("click",()=>setAuthMode("register"));
+$("toLogin")?.addEventListener("click",()=>setAuthMode("login"));
+setAuthMode("login");
 renderProfile();
 
 // ===== NEON PATH 6.0 — STORE UI =====

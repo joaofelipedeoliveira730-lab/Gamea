@@ -11,3 +11,53 @@
 .store-title{font-size:34px;font-weight:1000;letter-spacing:5px;text-shadow:0 0 18px #00f6ff}.store-title span{color:#00f6ff}.store-tabs{display:flex;gap:8px;margin:14px 0}.store-tabs button{background:#090f1f;color:#fff;border:1px solid #1a6880;border-radius:10px;padding:10px 16px}
 #shopGrid,#inventoryGrid{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:14px}.shop-card{background:linear-gradient(160deg,#0b1021,#050711);border:1px solid rgba(0,246,255,.3);border-radius:18px;padding:14px;display:grid;gap:8px;min-height:190px}.shop-card small{opacity:.7}.shop-card strong{color:#ffe600}.shop-card button{border:0;border-radius:10px;padding:10px;background:linear-gradient(90deg,#00d9ff,#7d5cff);color:white;font-weight:900}.item-art{height:80px;display:grid;place-items:center;font-size:52px;text-shadow:0 0 15px #00f6ff}.item-crown{color:#ffd84a}.item-trail{color:#ff25d9}.item-aura{color:#8c5cff}.item-back{color:#ff25d9}.item-effect{color:#8cff00}.equipped{box-shadow:0 0 25px rgba(0,246,255,.5);transform:translateY(-2px)}
 .rarity-mythic{border-color:#ff25d9;box-shadow:0 0 20px rgba(255,37,217,.12)}.rarity-legendary{border-color:#ffd84a}.rarity-epic{border-color:#8c5cff}
+
+/* ===== AUTH 6.2 — login/cadastro limpo e responsivo ===== */
+#authPanel{width:min(94vw,520px);margin:auto;text-align:left;padding:28px 24px;background:linear-gradient(155deg,rgba(8,16,38,.96),rgba(4,7,18,.96));box-shadow:0 0 70px rgba(0,92,255,.18),inset 0 0 40px rgba(0,246,255,.025)}
+.auth-brand{text-align:center}.auth-brand .logo{font-size:clamp(48px,13vw,76px);letter-spacing:-4px;line-height:.95}.auth-brand .sub{margin:14px 0 22px;letter-spacing:3px;font-size:11px;opacity:.68}
+.auth-switch{display:grid;grid-template-columns:1fr 1fr;gap:6px;padding:5px;margin:0 0 20px;background:#020611;border:1px solid rgba(0,246,255,.16);border-radius:14px}
+.auth-tab{height:44px;border:0;border-radius:10px;background:transparent;color:#8190aa;font-weight:900;letter-spacing:1px}.auth-tab.active{color:#fff;background:linear-gradient(90deg,#006cff,#b900ff);box-shadow:0 0 18px rgba(0,108,255,.28)}
+.auth-form label{display:block;margin:14px 4px 6px;color:#aeb9cd;font-size:11px;font-weight:900;letter-spacing:1.5px}.auth-form label span{font-weight:500;opacity:.6;text-transform:none;letter-spacing:0}
+.auth-form input{width:100%;height:56px!important;margin:0!important;padding:0 16px!important;border-radius:14px!important;border:1px solid #214a66!important;background:#050a17!important;color:#fff!important;outline:none;font-size:16px}.auth-form input:focus{border-color:#00eaff!important;box-shadow:0 0 0 3px rgba(0,234,255,.08),0 0 22px rgba(0,234,255,.12)}
+.primary-auth{width:100%;height:56px;margin:20px 0 8px;border:0;border-radius:14px;background:linear-gradient(90deg,#0878ff,#c500ff);color:#fff;font-size:17px;font-weight:1000;letter-spacing:.5px;box-shadow:0 8px 28px rgba(66,0,255,.28);cursor:pointer}.primary-auth:active{transform:scale(.99)}
+.link-auth{display:block;width:100%;border:0;background:transparent;color:#00eaff;padding:12px 4px;font-size:13px;font-weight:800;cursor:pointer;text-align:center}.link-auth:hover{text-decoration:underline}
+#authMsg{min-height:24px;margin-top:8px;text-align:center;color:#ff61d8;font-weight:800;font-size:13px;line-height:1.35}
+#app[hidden]{display:none!important}
+@media(max-width:520px){#authPanel{padding:22px 16px;border-radius:20px}.auth-brand .logo{font-size:52px}.auth-brand .sub{font-size:9px;letter-spacing:2.5px}.auth-form input{height:54px!important}}
+
+/* ===== NEON PATH 6.3 — AUTH FULLSCREEN / RESPONSIVE ===== */
+[hidden]{display:none!important}
+html,body{min-height:100%;width:100%;margin:0;overflow:hidden}
+#authPanel{position:fixed;inset:0;width:100vw;height:100svh;min-height:100dvh;margin:0;padding:clamp(18px,4vw,54px);border:0;border-radius:0;display:flex;flex-direction:column;justify-content:center;align-items:center;background:radial-gradient(circle at 50% 18%,rgba(25,44,102,.62),rgba(3,5,14,.97) 55%,#010207 100%);box-shadow:none;overflow:auto;z-index:1000}
+#authPanel:before{content:"";position:absolute;inset:0;pointer-events:none;background-image:linear-gradient(rgba(0,246,255,.035) 1px,transparent 1px),linear-gradient(90deg,rgba(0,246,255,.035) 1px,transparent 1px);background-size:42px 42px;mask-image:linear-gradient(to bottom,black,transparent 90%)}
+#authPanel>*{position:relative;z-index:1}
+.auth-brand{width:min(92vw,760px);text-align:center;margin-bottom:clamp(12px,2vh,26px)}
+.auth-brand .logo{font-size:clamp(54px,10vw,112px);line-height:.9;letter-spacing:-6px}
+.auth-brand .sub{font-size:clamp(11px,1.5vw,15px);letter-spacing:clamp(2px,1vw,6px);margin-top:18px}
+#loginForm,#registerForm{width:min(94vw,540px)}
+.auth-form label{margin-top:12px}
+.auth-form input{height:58px!important;font-size:17px!important}
+.primary-auth{height:60px;margin-top:22px}
+.link-auth{font-size:14px;padding:15px 5px}
+.auth-foot{margin-top:12px;font-size:9px;letter-spacing:3px;opacity:.4;text-align:center}
+#authMsg{min-height:28px;max-width:540px}
+#app{min-height:100svh}
+@media (orientation:landscape) and (min-width:700px){
+  #authPanel{padding:18px 5vw;justify-content:center}
+  .auth-brand{margin-bottom:10px}
+  .auth-brand .logo{font-size:clamp(48px,8vw,82px)}
+  .auth-brand .sub{margin:8px 0 10px}
+  #loginForm,#registerForm{max-width:520px}
+  .auth-form label{margin-top:7px}
+  .auth-form input{height:48px!important}
+  .primary-auth{height:50px;margin-top:10px}
+  .link-auth{padding:8px}
+}
+@media (max-width:520px){
+  #authPanel{padding:18px 14px}
+  .auth-brand .logo{font-size:clamp(48px,15vw,68px);letter-spacing:-4px}
+  .auth-brand .sub{font-size:9px;letter-spacing:2px;margin-top:12px}
+  #loginForm,#registerForm{width:min(92vw,430px)}
+  .auth-form input{height:54px!important;font-size:16px!important}
+  .primary-auth{height:56px;font-size:16px}
+}

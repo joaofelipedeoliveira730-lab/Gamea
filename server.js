@@ -48,11 +48,13 @@ function authUser(req) {
 
 async function initDatabase() {
   if (!db) return;
+  // Migration segura: permite usar um PostgreSQL que já possuía uma tabela users
+  // de versões anteriores do NEON PATH.
   await db.query(`
     CREATE TABLE IF NOT EXISTS users (
       id BIGSERIAL PRIMARY KEY,
-      nickname VARCHAR(20) UNIQUE NOT NULL,
-      email VARCHAR(160) UNIQUE,
+      nickname VARCHAR(20),
+      email VARCHAR(160),
       password_hash TEXT,
       ph INTEGER NOT NULL DEFAULT 1000,
       wins INTEGER NOT NULL DEFAULT 0,
@@ -61,9 +63,33 @@ async function initDatabase() {
       bruto_coins INTEGER NOT NULL DEFAULT 15000,
       created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
     );
+    ALTER TABLE users ADD COLUMN IF NOT EXISTS nickname VARCHAR(20);
     ALTER TABLE users ADD COLUMN IF NOT EXISTS email VARCHAR(160);
+    ALTER TABLE users ADD COLUMN IF NOT EXISTS password_hash TEXT;
+    ALTER TABLE users ADD COLUMN IF NOT EXISTS ph INTEGER NOT NULL DEFAULT 1000;
+    ALTER TABLE users ADD COLUMN IF NOT EXISTS wins INTEGER NOT NULL DEFAULT 0;
+    ALTER TABLE users ADD COLUMN IF NOT EXISTS kills INTEGER NOT NULL DEFAULT 0;
+    ALTER TABLE users ADD COLUMN IF NOT EXISTS races INTEGER NOT NULL DEFAULT 0;
     ALTER TABLE users ADD COLUMN IF NOT EXISTS bruto_coins INTEGER NOT NULL DEFAULT 15000;
+    ALTER TABLE users ADD COLUMN IF NOT EXISTS created_at TIMESTAMPTZ NOT NULL DEFAULT NOW();
+  `);
 
+  // Compatibilidade com bancos antigos que usavam username/password.
+  const cols = (await db.query(`
+    SELECT column_name FROM information_schema.columns
+    WHERE table_schema='public' AND table_name='users'
+  `)).rows.map(r=>r.column_name);
+  if (cols.includes('username')) {
+    await db.query(`UPDATE users SET nickname=LEFT(username,20) WHERE (nickname IS NULL OR nickname='') AND username IS NOT NULL`);
+  }
+  if (cols.includes('password')) {
+    await db.query(`UPDATE users SET password_hash=password WHERE (password_hash IS NULL OR password_hash='') AND password IS NOT NULL`);
+  }
+  await db.query(`UPDATE users SET nickname='Piloto_'||id::text WHERE nickname IS NULL OR nickname=''`);
+  await db.query(`CREATE UNIQUE INDEX IF NOT EXISTS uq_users_nickname_lower ON users (LOWER(nickname))`);
+  await db.query(`CREATE UNIQUE INDEX IF NOT EXISTS uq_users_email_lower ON users (LOWER(email)) WHERE email IS NOT NULL AND email<>''`);
+
+  await db.query(`
     CREATE TABLE IF NOT EXISTS race_results (
       id BIGSERIAL PRIMARY KEY,
       user_id BIGINT REFERENCES users(id) ON DELETE SET NULL,
@@ -74,7 +100,6 @@ async function initDatabase() {
       map VARCHAR(40) NOT NULL DEFAULT 'Neon Canyon',
       created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
     );
-
     CREATE TABLE IF NOT EXISTS player_profiles (
       user_id BIGINT PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
       level INTEGER NOT NULL DEFAULT 1,
@@ -165,11 +190,10 @@ app.post('/api/auth/register', async (req,res) => {
   const email=cleanEmail(req.body?.email);
   const password=req.body?.password;
   if (!nickname) return res.status(400).json({error:'apelido inválido'});
-  if (!email) return res.status(400).json({error:'e-mail inválido'});
   if (!validPassword(password)) return res.status(400).json({error:'senha deve ter pelo menos 8 caracteres'});
   try {
     const hash=await bcrypt.hash(password,12);
-    const q=await db.query(`INSERT INTO users(nickname,email,password_hash) VALUES($1,$2,$3) RETURNING id,nickname`,[nickname,email,hash]);
+    const q=await db.query(`INSERT INTO users(nickname,email,password_hash) VALUES($1,$2,$3) RETURNING id,nickname`,[nickname,email || null,hash]);
     const user=q.rows[0];
     await getProfile(user.id);
     res.json({token:signUser(user),nickname:user.nickname});
@@ -190,7 +214,7 @@ app.post('/api/auth/login', async (req,res) => {
     const user=q.rows[0];
     if (!user?.password_hash || !(await bcrypt.compare(password,user.password_hash))) return res.status(401).json({error:'apelido/e-mail ou senha incorretos'});
     res.json({token:signUser(user),nickname:user.nickname});
-  } catch(e) { console.error('login:',e); res.status(500).json({error:'login_error'}); }
+  } catch(e) { console.error('login:',e); res.status(500).json({error:'login_error',detail:process.env.NODE_ENV==='production'?undefined:e.message}); }
 });
 
 app.post('/api/auth/guest', async (req,res) => {
