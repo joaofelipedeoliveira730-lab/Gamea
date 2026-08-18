@@ -17,7 +17,7 @@ assert(app.includes('caches.open("neon-path-resources-v1")'),'resource cache mis
 assert(app.includes('mode:"solo"'),'solo request missing');
 assert(app.includes('roomName:pr.name'),'room name request missing');
 assert(app.includes('password:pr.password'),'room password request missing');
-assert(app.includes('/resources/hd_scenes/'),'HD scenery pipeline missing');
+assert(app.includes('hd_scenes'),'HD scenery pipeline missing');
 assert(app.includes('AINDA CARREGANDO... OTIMIZANDO O CENÁRIO'),'3 second slow-loading feedback missing');
 assert(app.includes('effectiveQuality'),'adaptive quality missing');
 assert(app.includes('bindHold'),'touch hold controls missing');
@@ -35,6 +35,9 @@ assert(!/bot:\s*p\.bot/.test(server),'bot flag must not be exposed');
 assert(manifest.hd_scenes.length===8,'8 HD scene assets missing');
 assert(manifest.portraits.length===8,'8 portrait assets missing');
 for(const f of [...manifest.hd_scenes,...manifest.portraits]) assert(fs.existsSync(f),`missing resource ${f}`);
+for(const key of ['environment_textures','sky_billboards','arena_detail','hd_scenes','portraits']) for(const f of manifest[key]||[]) assert(!f.includes('/'),'flat layout violation: '+f);
+for(const f of fs.readdirSync('.')) assert(f!=='resources' && f!=='vendor','folder must not exist: '+f);
+assert(html.includes('https://cdn.jsdelivr.net/npm/three@0.178.0/build/three.module.js'),'Three.js pin missing');
 
 // ================= RACE ENGINE SIMULATION =================
 const TRACKS=[
@@ -116,7 +119,7 @@ assert(app.includes('webglcontextlost'),'WebGL context recovery missing');
 assert(app.includes('characterId:selectedCharacter'),'selected character not sent to race');
 assert(server.includes('characterId:p.characterId||1'),'character identity not exposed to HUD safely');
 assert(server.includes('targetLane'),'bot racing-line logic missing');
-console.log('NEON PATH 9.4 QA: OK');
+console.log('NEON PATH 9.7 FLAT QA: OK');
 console.log(`RACE SIMULATION: ${completed} complete races across 3 modes x 8 maps`);
 console.log('SECURITY SIMULATION: private passwords, owner-only start, hidden AI, input clamping/rate-limit model: OK');
 console.log('MOBILE QA: landscape lock helper + touch steering/turbo/item controls present + WebGL recovery');
