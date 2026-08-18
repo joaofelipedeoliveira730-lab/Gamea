@@ -1,6 +1,6 @@
 {
   "name": "neon-path",
-  "version": "9.5.0",
+  "version": "9.7.0",
   "private": true,
   "scripts": {
     "start": "node server.js",

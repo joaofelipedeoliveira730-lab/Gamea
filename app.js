@@ -13,17 +13,18 @@ function effectiveQuality(){
 let authToken=localStorage.getItem("neon_token")||"";
 let currentUser="Piloto", selectedCharacter=0, selectedTrack="neon-city", pendingAction="quick";
 let renderer,scene,camera,clock,playerMeshes=new Map(),itemBoxes=[],worldGroup,environmentGroup,environmentSeed=0,particles,trackDef,lastState,lastRaceStart=0,gameRunning=false,roomMode="room",trackBackdrop=null,trackTextureLoader=new THREE.TextureLoader(),backdropPromise=Promise.resolve(),loadingTimer=null;
+let lastFrameTime=performance.now();
 let keys={left:false,right:false,drift:false,accelerate:false,brake:false}, touchTimer=null, cameraTarget=new THREE.Vector3(), cameraLook=new THREE.Vector3(), renderFrame=0;
 
 const CHARACTERS=[
- {id:1,name:"SPARK",icon:"🤖",portrait:"/resources/portraits/1-spark.svg",color:"#38d9ff",stats:[78,76,72,88]},
- {id:2,name:"LUNA",icon:"🦊",portrait:"/resources/portraits/2-luna.svg",color:"#ff5fb4",stats:[82,74,88,76]},
- {id:3,name:"STEEL",icon:"🦾",portrait:"/resources/portraits/3-steel.svg",color:"#c9d3df",stats:[70,88,62,82]},
- {id:4,name:"ZIPPY",icon:"👽",portrait:"/resources/portraits/4-zippy.svg",color:"#7cff58",stats:[92,67,72,86]},
- {id:5,name:"BLAZE",icon:"🐲",portrait:"/resources/portraits/5-blaze.svg",color:"#ff6b35",stats:[80,84,66,90]},
- {id:6,name:"FROST",icon:"🐺",portrait:"/resources/portraits/6-frost.svg",color:"#bcecff",stats:[74,80,90,70]},
- {id:7,name:"ROCKY",icon:"🐻",portrait:"/resources/portraits/7-rocky.svg",color:"#b77d58",stats:[66,92,70,80]},
- {id:8,name:"NITRO",icon:"🧑‍🚀",portrait:"/resources/portraits/8-nitro.svg",color:"#ffd84a",stats:[88,78,78,96]}
+ {id:1,name:"SPARK",icon:"🤖",portrait:"/1-spark.svg",color:"#38d9ff",stats:[78,76,72,88]},
+ {id:2,name:"LUNA",icon:"🦊",portrait:"/2-luna.svg",color:"#ff5fb4",stats:[82,74,88,76]},
+ {id:3,name:"STEEL",icon:"🦾",portrait:"/3-steel.svg",color:"#c9d3df",stats:[70,88,62,82]},
+ {id:4,name:"ZIPPY",icon:"👽",portrait:"/4-zippy.svg",color:"#7cff58",stats:[92,67,72,86]},
+ {id:5,name:"BLAZE",icon:"🐲",portrait:"/5-blaze.svg",color:"#ff6b35",stats:[80,84,66,90]},
+ {id:6,name:"FROST",icon:"🐺",portrait:"/6-frost.svg",color:"#bcecff",stats:[74,80,90,70]},
+ {id:7,name:"ROCKY",icon:"🐻",portrait:"/7-rocky.svg",color:"#b77d58",stats:[66,92,70,80]},
+ {id:8,name:"NITRO",icon:"🧑‍🚀",portrait:"/8-nitro.svg",color:"#ffd84a",stats:[88,78,78,96]}
 ];
 const TRACKS=[
  {id:"neon-city",name:"NEON CITY",theme:"city",desc:"Arranha-céus e curvas molhadas",colors:[0x071a43,0xff22d5]},
@@ -63,7 +64,7 @@ async function downloadGameResources(){
  $("downloadResources").disabled=true;$("resourceStatus").textContent="Baixando recursos essenciais...";
  try{
   const manifest=await fetch("/assets-manifest.json",{cache:"no-store"}).then(r=>r.json());
-  const files=["style.css","app.js",...(manifest.environment_textures||[]).slice(0,10),...(manifest.sky_billboards||[]).slice(0,2),...(manifest.arena_detail||[]).slice(0,4)];
+  const files=["style.css","app.js",...(manifest.hd_scenes||[]),...(manifest.portraits||[]),...(manifest.environment_textures||[]).slice(0,12),...(manifest.sky_billboards||[]).slice(0,2),...(manifest.arena_detail||[]).slice(0,4)];
   const cache=await caches.open("neon-path-resources-v1");let done=0;
   for(const file of files){try{await cache.add("/"+file)}catch{}done++;const pct=Math.round(done/files.length*100);$("resourcePercent").textContent=pct+"%";$("loadFill")?.style.setProperty("width",pct+"%");}
   localStorage.setItem("neon_resources_v1","ready");$("resourceStatus").textContent=`Recursos preparados (${files.length} arquivos).`;$("resourcePercent").textContent="100%";$("continueWithoutDownload").disabled=false;$("downloadResources").textContent="RECURSOS PRONTOS";
@@ -204,6 +205,7 @@ function showHit(x){const el=document.createElement("div");el.textContent=`⚡ $
 
 function setupRenderer(){
  const oldCanvas=$("scene");
+ if(!window.WebGLRenderingContext) throw new Error("WebGL indisponível neste navegador");
  if(renderer){try{renderer.dispose();}catch{} oldCanvas.replaceWith(oldCanvas.cloneNode(false));}
  const canvas=$("scene");
  const q=effectiveQuality();
@@ -246,7 +248,7 @@ function addBillboard(group,url,x,z,w=9,h=5){
  return s;
 }
 function addBackdrop(t){
- const path=`/resources/hd_scenes/${t.id}.svg`;
+ const path=`/${t.id}.svg`;
  const spriteMat=new THREE.SpriteMaterial({color:0xffffff,transparent:true,opacity:.94,depthWrite:false,fog:false});
  trackBackdrop=new THREE.Sprite(spriteMat);trackBackdrop.position.set(0,34,0);trackBackdrop.scale.set(210,118,1);scene.add(trackBackdrop);
  backdropPromise=new Promise(resolve=>trackTextureLoader.load(path,tex=>{tex.colorSpace=THREE.SRGBColorSpace;spriteMat.map=tex;spriteMat.needsUpdate=true;resolve(true)},undefined,()=>resolve(false)));
@@ -549,12 +551,35 @@ function drawMap(s){
 function animate(){
  if(!gameRunning)return;
  requestAnimationFrame(animate);
- const now=performance.now(),dt=Math.min(.05,(now-lastFrameTime)/1000||.016);lastFrameTime=now;
- if(lastState)updateCars(lastState,dt);
- if(particles)particles.rotation.y+=dt*.015;
- itemBoxes.forEach((b,i)=>{b.rotation.y+=dt*(1.0+(i%3)*.15);b.position.y=1.35+Math.sin(now/260+i)*.12;});
- renderer.render(scene,camera);
- $('timer').textContent=new Date(Date.now()-lastRaceStart).toISOString().slice(14,19);
+ try{
+  const now=performance.now(),dt=Math.min(.05,Math.max(.001,(now-lastFrameTime)/1000||.016));lastFrameTime=now;
+  if(lastState)updateCars(lastState,dt);
+  if(particles)particles.rotation.y+=dt*.015;
+  itemBoxes.forEach((b,i)=>{b.rotation.y+=dt*(1.0+(i%3)*.15);b.position.y=1.35+Math.sin(now/260+i)*.12;});
+  if(renderer&&scene&&camera)renderer.render(scene,camera);
+  $('timer').textContent=new Date(Date.now()-lastRaceStart).toISOString().slice(14,19);
+ }catch(err){
+  console.error('NEON PATH render loop recovered:',err);
+  gameRunning=false;
+  setTimeout(()=>{ if(!gameRunning) recoverRaceAfterRenderError(trackDef?.id||selectedTrack); },0);
+ }
+}
+function recoverRaceAfterRenderError(id){
+ try{
+  trackDef=TRACKS.find(t=>t.id===id)||TRACKS[0];
+  setupRenderer();
+  scene.background=new THREE.Color(trackDef.colors[0]);
+  scene.fog=new THREE.Fog(trackDef.colors[0],55,170);
+  scene.add(new THREE.HemisphereLight(0xb7d8ff,0x24402d,2.0));
+  const sun=new THREE.DirectionalLight(0xffffff,2.0);sun.position.set(30,55,25);sun.castShadow=false;scene.add(sun);
+  buildEmergencyTrack(trackDef);
+  show('game');lastRaceStart=lastRaceStart||Date.now();lastFrameTime=performance.now();gameRunning=true;animate();
+ }catch(err){
+  console.error('NEON PATH render recovery failed:',err);
+  gameRunning=false;
+  show('menu');
+  message('Não foi possível iniciar o motor 3D. Tente novamente.');
+ }
 }
 function resize(){if(!renderer||!camera)return;camera.aspect=innerWidth/innerHeight;camera.updateProjectionMatrix();renderer.setSize(innerWidth,innerHeight,false);}
 function emitSteer(type){if(socket.connected)socket.emit('input',{type});}
