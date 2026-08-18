@@ -1,0 +1,14 @@
+services:
+  - type: web
+    name: neon-path
+    runtime: node
+    plan: free
+    buildCommand: npm install
+    startCommand: npm start
+    envVars:
+      - key: DATABASE_URL
+        sync: false
+      - key: PUBLIC_ORIGIN
+        value: https://SEU-FRONTEND.github.io
+      - key: NODE_ENV
+        value: production

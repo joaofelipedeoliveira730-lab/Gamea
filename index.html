@@ -1,0 +1,97 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
+  <meta name="theme-color" content="#05050b">
+  <title>NEON PATH</title>
+  <link rel="stylesheet" href="./style.css">
+</head>
+<body>
+  <div id="app">
+    <canvas id="game"></canvas>
+
+    <section id="menu" class="screen">
+      <div class="brand">
+        <div class="brand-kicker">MULTIPLAYER SURVIVAL</div>
+        <h1>NEON <span>PATH</span></h1>
+        <p>Entre. Acelere. Corte o caminho. Sobreviva.</p>
+      </div>
+
+      <div class="panel">
+        <label>SEU APELIDO</label>
+        <input id="nickname" maxlength="18" autocomplete="off" placeholder="Ex.: Velho" />
+        <div class="row">
+          <button id="quickBtn" class="primary">JOGAR AGORA</button>
+          <button id="roomBtn">CRIAR SALA</button>
+        </div>
+        <button id="leaderBtn" class="ghost">LIGA NEON</button>
+        <div id="menuMsg" class="msg"></div>
+      </div>
+
+      <div class="tips">
+        <span>← → / A D <b>GIRAR</b></span>
+        <span>SPACE <b>TURBO</b></span>
+        <span>E <b>SOPRO</b></span>
+      </div>
+    </section>
+
+    <section id="room" class="screen hidden">
+      <div class="panel room-panel">
+        <div class="room-title">SALA <strong id="roomCode">----</strong></div>
+        <div id="roomPlayers" class="players"></div>
+        <div class="row">
+          <button id="startBtn" class="primary">INICIAR</button>
+          <button id="leaveBtn">SAIR</button>
+        </div>
+        <div id="roomMsg" class="msg"></div>
+      </div>
+    </section>
+
+    <section id="leaderboard" class="screen hidden">
+      <div class="panel leaderboard-panel">
+        <div class="room-title">LIGA <strong>NEON</strong></div>
+        <div id="leaders"></div>
+        <button id="backBtn">VOLTAR</button>
+      </div>
+    </section>
+
+    <aside id="hud" class="hidden">
+      <div class="hud-top">
+        <div class="pill">ROUND <b id="roundTime">0:00</b></div>
+        <div class="pill">ZONA <b id="zoneText">100%</b></div>
+      </div>
+      <div id="scoreboard" class="scoreboard"></div>
+      <div class="bars">
+        <div class="bar turbo"><i id="turboBar"></i></div>
+        <div class="bar breath"><i id="breathBar"></i></div>
+      </div>
+      <div id="mobileControls" class="mobile-controls">
+        <button data-key="left">↶</button>
+        <button data-key="turbo">⚡</button>
+        <button data-key="breath">◎</button>
+        <button data-key="right">↷</button>
+      </div>
+      <div id="chat" class="chat hidden">
+        <div id="chatLog"></div>
+        <input id="chatInput" maxlength="120" placeholder="Mensagem..." />
+      </div>
+    </aside>
+
+    <section id="result" class="screen hidden">
+      <div class="panel result-panel">
+        <div class="winner-label">VENCEDOR</div>
+        <h2 id="winnerName">---</h2>
+        <div id="resultStats"></div>
+        <div class="row">
+          <button id="againBtn" class="primary">JOGAR NOVAMENTE</button>
+          <button id="resultHomeBtn">MENU</button>
+        </div>
+      </div>
+    </section>
+  </div>
+
+  <script src="./config.js"></script>
+  <script src="./app.js"></script>
+</body>
+</html>
