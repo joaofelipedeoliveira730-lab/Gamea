@@ -1,6 +1,6 @@
 import * as THREE from "three";
 const $=id=>document.getElementById(id), socket=io();
-let quality="auto",room="",me="",scene,camera,renderer,world=[],trailMeshes=new Map(),lastState=null,last=performance.now(),keys={};
+let quality="auto",room="",me="",scene,camera,renderer,world=[],trailMeshes=new Map(),lastState=null,last=performance.now(),keys={},floorMat=null;
 $("quality").onclick=()=>{quality=quality==="auto"?"low":quality==="low"?"medium":quality==="medium"?"high":"auto";$("quality").textContent="QUALIDADE: "+quality.toUpperCase();if(renderer)applyQuality()};
 function nick(){return $("nick").value.trim()||"Piloto"}
 function msg(x){$("msg").textContent=x}
@@ -21,7 +21,7 @@ function init3D(){
  camera=new THREE.PerspectiveCamera(55,innerWidth/innerHeight,.1,400);camera.position.set(0,34,30);camera.lookAt(0,0,0);
  renderer=new THREE.WebGLRenderer({canvas:$("scene"),antialias:quality!=="low",powerPreference:"high-performance"});renderer.setPixelRatio(Math.min(devicePixelRatio,quality==="high"?1.75:quality==="medium"?1.35:1));renderer.setSize(innerWidth,innerHeight);applyQuality();
  const amb=new THREE.HemisphereLight(0x5c7cff,0x050509,2);scene.add(amb);
- const floorMat=new THREE.MeshStandardMaterial({color:0x070b15,roughness:.82,metalness:.25}); const floor=new THREE.Mesh(new THREE.PlaneGeometry(120,80),floorMat);floor.rotation.x=-Math.PI/2;scene.add(floor);
+ floorMat=new THREE.MeshStandardMaterial({color:0x070b15,roughness:.82,metalness:.25}); const floor=new THREE.Mesh(new THREE.PlaneGeometry(120,80),floorMat);floor.rotation.x=-Math.PI/2;scene.add(floor);
  const grid=new THREE.GridHelper(120,30,0x073cff,0x10203a);grid.position.y=.02;scene.add(grid); applyEnvironmentTexture();
  for(let x=-50;x<=50;x+=10) billboard(x,-8,0x102c6e); for(let x=-50;x<=50;x+=10) billboard(x,8,0x3c0b55);
  const wallMat=new THREE.MeshStandardMaterial({color:0x081b30,emissive:0x001d44,emissiveIntensity:2});
