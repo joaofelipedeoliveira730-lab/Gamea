@@ -3,8 +3,8 @@
 
   const $ = s => document.querySelector(s);
   const canvas = $("#game"), ctx = canvas.getContext("2d");
-  const menu = $("#menu"), room = $("#room"), leader = $("#leaderboard"), result = $("#result"), hud = $("#hud");
-  const nickname = $("#nickname"), menuMsg = $("#menuMsg"), roomMsg = $("#roomMsg");
+  const menu = $("#menu"), room = $("#room"), leader = $("#leaderboard"), result = $("#result"), hud = $("#hud"), joinPanel=$("#joinPanel"), createPanel=$("#createPanel");
+  const nickname = $("#nickname"), menuMsg = $("#menuMsg"), roomMsg = $("#roomMsg"), joinMsg=$("#joinMsg"), createMsg=$("#createMsg");
 
   let ws = null, me = null, roomId = null, state = null, lastFrame = performance.now(), inputSeq = 0;
   let pressed = new Set(), audioCtx = null, musicTimer = null;
@@ -19,7 +19,7 @@
   addEventListener("resize", resize); resize();
 
   function show(which){
-    [menu,room,leader,result].forEach(x=>x.classList.add("hidden"));
+    [menu,room,leader,result,joinPanel,createPanel].forEach(x=>x.classList.add("hidden"));
     which.classList.remove("hidden");
   }
 
@@ -49,7 +49,7 @@
   }
 
   function handle(m){
-    if(m.type==="error"){ menuMsg.textContent=m.message; roomMsg.textContent=m.message; return; }
+    if(m.type==="error"){ menuMsg.textContent=m.message; roomMsg.textContent=m.message; joinMsg.textContent=m.message; createMsg.textContent=m.message; return; }
     if(m.type==="hello"){ me=m.player; return; }
     if(m.type==="room"){
       roomId=m.room.id; $("#roomCode").textContent=roomId;
@@ -66,19 +66,37 @@
     if(m.type==="chat") addChat(m.nickname,m.message);
   }
 
-  async function join(mode="quick"){
+  async function join(mode="quick", extra={}){
     const name=(nickname.value||"").trim();
     if(name.length<2){menuMsg.textContent="Digite um apelido de 2 a 18 caracteres.";return}
     try{
       menuMsg.textContent="Conectando...";
       await connect();
-      send("join",{nickname:name, mode});
+      send("join",{nickname:name, mode, ...extra});
       startAudio();
     }catch(e){menuMsg.textContent="Servidor indisponível. Confira a URL do Render."}
   }
 
-  $("#quickBtn").onclick=()=>join("quick");
-  $("#roomBtn").onclick=()=>join("room");
+  $("#joinExistingBtn").onclick=()=>{joinMsg.textContent="";show(joinPanel);$("#roomCodeInput").focus()};
+  $("#joinCancelBtn").onclick=()=>show(menu);
+  $("#joinConfirmBtn").onclick=()=>{
+    const code=($("#roomCodeInput").value||"").trim().toUpperCase();
+    if(!code){joinMsg.textContent="Digite o código da sala.";return}
+    const key=($("#joinKey").value||"").trim();
+    joinMsg.textContent="Conectando...";
+    join("join_room",{roomId:code,key});
+  };
+
+  $("#roomBtn").onclick=()=>{createMsg.textContent="";$("#ceoKeyBox").classList.add("hidden");show(createPanel)};
+  $("#normalCreateBtn").onclick=()=>join("create");
+  $("#ceoCreateBtn").onclick=()=>{$("#ceoKeyBox").classList.remove("hidden");$("#ceoKey").focus()};
+  $("#ceoConfirmBtn").onclick=()=>{
+    const key=($("#ceoKey").value||"").trim();
+    if(!key){createMsg.textContent="Digite a chave CEO.";return}
+    createMsg.textContent="Validando chave...";
+    join("create_ceo",{key});
+  };
+  $("#createCancelBtn").onclick=()=>show(menu);
   $("#leaderBtn").onclick=async()=>{try{await connect();send("leaderboard")}catch{menuMsg.textContent="Servidor indisponível."}};
   $("#backBtn").onclick=()=>show(menu);
   $("#startBtn").onclick=()=>send("start");
@@ -124,7 +142,7 @@
   function renderRoom(r){
     $("#roomPlayers").innerHTML=r.players.map(p=>`<div class="player-row"><span>${esc(p.nickname)}</span><b>${p.ready?"READY":"WAIT"}</b></div>`).join("");
     $("#startBtn").disabled = !r.canStart;
-    roomMsg.textContent = r.players.length<2 ? "Aguardando mais jogadores..." : "Pronto para começar.";
+    roomMsg.textContent = r.ceoOnly ? "SALA CEO • você pode iniciar sozinho para teste." : (r.players.length<2 ? "Aguardando mais jogadores..." : "Pronto para começar.");
   }
 
   function renderLeaders(rows){

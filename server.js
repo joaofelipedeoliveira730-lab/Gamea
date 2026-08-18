@@ -55,6 +55,7 @@ const wss=new WebSocketServer({server});
 const rooms=new Map();
 const clients=new Map();
 const MAX_PLAYERS=10;
+const CEO_ROOM_KEY=String(process.env.CEO_ROOM_KEY||"");
 const TICK=50;
 const MAX_CHAT_PER_10S=8;
 const MAX_INPUT_PER_SECOND=24;
@@ -69,7 +70,15 @@ function cleanName(v){return String(v||"").trim().replace(/[^\p{L}\p{N}_ -]/gu,"
 function clamp(v,a,b){return Math.max(a,Math.min(b,v))}
 function safeRoomCode(){return Math.random().toString(36).slice(2,6).toUpperCase()}
 function publicPlayer(p){return {id:p.id,nickname:p.nickname,colorIndex:p.colorIndex,alive:p.alive,kills:p.kills,distance:Math.floor(p.distance),energy:Math.floor(p.energy),breath:Math.floor(p.breath),x:p.x/ARENA,y:p.y/ARENA,angle:p.angle,trail:p.trail.slice(-900)}} 
-function publicRoom(r,p){return {id:r.id,players:r.players.map(x=>({id:x.id,nickname:x.nickname,ready:x.ready})),canStart:r.players.length>=2&&r.hostId===p.id}}
+function publicRoom(r,p){
+  return {
+    id:r.id,
+    players:r.players.map(x=>({id:x.id,nickname:x.nickname,ready:x.ready})),
+    canStart: r.hostId===p.id && (r.ceoOnly ? p.isCEO : r.players.length>=2),
+    ceoOnly:r.ceoOnly,
+    isCEO:!!p.isCEO
+  };
+}
 
 async function upsertPlayer(nickname){
   const q=`INSERT INTO players(nickname) VALUES($1)
@@ -79,15 +88,19 @@ async function upsertPlayer(nickname){
 }
 
 class Room{
-  constructor(id){this.id=id;this.hostId=null;this.players=[];this.phase="lobby";this.startedAt=0;this.time=0;this.zone=1;this.last=Date.now();this.timer=null;this.resultAt=0}
+  constructor(id,opts={}){this.id=id;this.hostId=null;this.ceoOnly=!!opts.ceoOnly;this.ceoId=opts.ceoId||null;this.players=[];this.phase="lobby";this.startedAt=0;this.time=0;this.zone=1;this.last=Date.now();this.timer=null;this.resultAt=0}
   add(p){if(this.players.length>=MAX_PLAYERS)return false;p.room=this;this.players.push(p);if(!this.hostId)this.hostId=p.id;return true}
   remove(p){
     this.players=this.players.filter(x=>x!==p);
     if(this.hostId===p.id)this.hostId=this.players[0]?.id||null;
     if(!this.players.length)this.stop();
   }
-  start(){
-    if(this.players.length<2||this.phase==="playing")return;
+  start(requester){
+    if(this.phase==="playing")return;
+    if(this.ceoOnly){
+      if(!requester?.isCEO || requester.id!==this.ceoId)return false;
+      if(this.players.length<1)return false;
+    }else if(this.players.length<2)return false;
     this.phase="playing";this.time=0;this.zone=1;this.startedAt=Date.now();
     const slots=spawnSlots(this.players.length);
     this.players.forEach((p,i)=>p.reset(slots[i],i));
@@ -103,7 +116,8 @@ class Room{
     const active=this.players.filter(p=>p.alive);
     for(const p of active)p.update(dt,this);
     this.collisions();
-    if(this.players.filter(p=>p.alive).length<=1)this.finish();
+    const aliveCount=this.players.filter(p=>p.alive).length;
+    if(this.ceoOnly ? aliveCount===0 : aliveCount<=1)this.finish();
     else this.broadcastState();
   }
   collisions(){
@@ -164,7 +178,7 @@ class Room{
 
 class Player{
   constructor(ws,db){
-    this.ws=ws;this.dbId=db.id;this.id=crypto.randomUUID();this.nickname=db.nickname;this.ready=true;this.room=null;
+    this.ws=ws;this.dbId=db.id;this.id=crypto.randomUUID();this.nickname=db.nickname;this.ready=true;this.isCEO=false;this.room=null;
     this.colorIndex=Math.floor(Math.random()*COLORS);this.alive=false;this.trail=[];this.trailKeys=new Set();this.occupied=new Set();
     this.x=0;this.y=0;this.angle=0;this.speed=165;this.energy=100;this.breath=100;this.kills=0;this.distance=0;this.lastLeft=0;this.lastRight=0;this.coolTurbo=0;this.coolBreath=0;
   }
@@ -236,19 +250,53 @@ wss.on("connection",ws=>{
         if(nickname.length<2)return send(ws,{type:"error",message:"Apelido inválido."});
         const db=await upsertPlayer(nickname);
         const p=new Player(ws,db);clients.set(p.id,p);
-        let r;
-        if(m.mode==="room"){
-          r=new Room(safeRoomCode());rooms.set(r.id,r);
-        }else{
-          r=[...rooms.values()].find(x=>x.phase==="lobby"&&x.players.length<MAX_PLAYERS)||new Room(safeRoomCode());
-          if(!rooms.has(r.id))rooms.set(r.id,r);
+
+        if(m.mode==="create_ceo"){
+          if(!CEO_ROOM_KEY || String(m.key||"")!==CEO_ROOM_KEY){
+            clients.delete(p.id);
+            return send(ws,{type:"error",message:"Chave CEO inválida."});
+          }
+          p.isCEO=true;
+          const r=new Room(safeRoomCode(),{ceoOnly:true,ceoId:p.id});
+          rooms.set(r.id,r);
+          r.add(p);
+          send(ws,{type:"hello",player:{id:p.id,nickname:p.nickname,isCEO:true}});
+          return broadcast(r,{type:"room",room:publicRoom(r,p)});
         }
-        r.add(p);send(ws,{type:"hello",player:{id:p.id,nickname:p.nickname}});broadcast(r,{type:"room",room:publicRoom(r,p)});
+
+        if(m.mode==="create"){
+          const r=new Room(safeRoomCode());
+          rooms.set(r.id,r); r.add(p);
+          send(ws,{type:"hello",player:{id:p.id,nickname:p.nickname,isCEO:false}});
+          return broadcast(r,{type:"room",room:publicRoom(r,p)});
+        }
+
+        if(m.mode==="join_room"){
+          const code=String(m.roomId||"").trim().toUpperCase();
+          const r=rooms.get(code);
+          if(!r || r.phase!=="lobby" || r.players.length>=MAX_PLAYERS){
+            clients.delete(p.id); return send(ws,{type:"error",message:"Sala não encontrada ou lotada."});
+          }
+          if(r.ceoOnly && String(m.key||"")!==CEO_ROOM_KEY){
+            clients.delete(p.id); return send(ws,{type:"error",message:"Esta é uma sala exclusiva do CEO."});
+          }
+          if(!r.add(p)){clients.delete(p.id);return send(ws,{type:"error",message:"Sala lotada."});}
+          if(r.ceoOnly)p.isCEO=(p.id===r.ceoId);
+          send(ws,{type:"hello",player:{id:p.id,nickname:p.nickname,isCEO:!!p.isCEO}});
+          return broadcast(r,{type:"room",room:publicRoom(r,p)});
+        }
+
+        // Quick play never selects CEO-only rooms.
+        let r=[...rooms.values()].find(x=>!x.ceoOnly&&x.phase==="lobby"&&x.players.length<MAX_PLAYERS);
+        if(!r){r=new Room(safeRoomCode());rooms.set(r.id,r);}
+        r.add(p);
+        send(ws,{type:"hello",player:{id:p.id,nickname:p.nickname,isCEO:false}});
+        broadcast(r,{type:"room",room:publicRoom(r,p)});
       }
       else if(m.type==="start"){
         const p=clients.get(m.id)||[...clients.values()].find(x=>x.ws===ws);if(!p?.room)return;
         if(p.id!==p.room.hostId)return send(ws,{type:"error",message:"Só o líder da sala pode iniciar."});
-        p.room.start();
+        if(!p.room.start(p))return send(ws,{type:"error",message:p.room.ceoOnly?"Somente o CEO pode iniciar esta sala.":"São necessários 2 jogadores."});
       }
       else if(m.type==="input"){
         const p=[...clients.values()].find(x=>x.ws===ws);if(p)p.ws._input={left:!!m.left,right:!!m.right,turbo:!!m.turbo,breath:!!m.breath};

@@ -52,3 +52,7 @@ Implemented protections include:
 - WebSocket error handling and session lifetime limits.
 
 No browser game can make cheating absolutely impossible, but this prevents the common forms of DevTools/console manipulation from directly awarding wins, kills, speed, PH or teleporting the player.
+
+
+## Sala CEO de teste
+Defina no Render a variável `CEO_ROOM_KEY`. A sala CEO só pode ser criada/entrada com essa chave e o CEO pode iniciar a partida com apenas 1 jogador. A chave nunca é enviada ao navegador nem exibida na interface.

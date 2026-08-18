@@ -42,3 +42,11 @@ Resultado automático: **17/17 verificações passaram**.
 - O servidor cria automaticamente a tabela `players` e o índice na inicialização.
 - `/health` agora verifica a tabela `players`, não apenas a conexão TCP com o PostgreSQL.
 - O servidor só começa a aceitar partidas depois que a inicialização do banco termina com sucesso.
+
+## Sala CEO
+- Chave validada somente no servidor via `CEO_ROOM_KEY`.
+- Sala CEO não aparece no matchmaking rápido.
+- Entrada em sala CEO exige a chave.
+- Apenas o CEO pode iniciar.
+- CEO pode iniciar com 1 jogador para teste.
+- Chave não é enviada ao cliente.

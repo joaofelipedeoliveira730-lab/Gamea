@@ -21,3 +21,9 @@ h1 span{color:var(--pink)}.brand p{color:#9da5c0}.panel{width:min(440px,94vw);pa
 .chat{position:absolute;left:14px;bottom:14px;width:250px;pointer-events:auto;background:#050710c9;border:1px solid #20253a;border-radius:12px;overflow:hidden}.chat #chatLog{max-height:120px;overflow:auto;padding:8px;font-size:11px}.chat input{border:0;border-top:1px solid #20253a;border-radius:0}
 .winner-label{color:var(--cyan);font-weight:1000;letter-spacing:.3em;text-align:center;font-size:12px}.result-panel{text-align:center}.result-panel h2{font-size:42px;margin:8px 0 20px;text-shadow:0 0 25px #00f6ff60}.stat-card{padding:10px;margin:6px 0;background:#080b16;border:1px solid #20253a;border-radius:10px}
 @media(max-width:700px){.brand{margin-bottom:14px}.panel{padding:18px}.tips{display:none}.mobile-controls{display:flex}.bars{bottom:110px}.scoreboard{width:170px}.chat{width:calc(100vw - 28px)}}
+
+.menu-actions{display:grid;grid-template-columns:1fr;gap:10px;margin-top:14px}
+.subtle{color:#8d91a8;font-size:.88rem;line-height:1.4;margin:8px 0 14px}
+small{color:#767b96;font-weight:500}
+#ceoKeyBox{margin-top:12px;padding:12px;border:1px solid rgba(255,43,214,.25);border-radius:14px;background:rgba(255,43,214,.04)}
+#ceoKeyBox button{margin-top:10px}
