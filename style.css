@@ -73,3 +73,33 @@
 #game:before{content:"";position:absolute;inset:0;pointer-events:none;background:radial-gradient(circle at 50% 45%,transparent 45%,#0005 100%);z-index:1}.race-hud{z-index:2}.race-vignette{z-index:1}
 @media (pointer:coarse) and (orientation:landscape){.touch-controls{gap:9px}.touch-controls button{width:68px;height:68px}.touch-actions{gap:8px}.touch-actions button{width:82px;height:58px;font-size:12px}.race-exit{z-index:3}}
 @media (orientation:portrait){#rotateNotice{z-index:9999!important;display:grid!important}.rotate-card{max-width:92vw}.rotate-card h2{font-family:Impact,Arial Black,sans-serif;letter-spacing:2px;font-size:28px}.rotate-card p{line-height:1.5;opacity:.75}}
+
+/* V9.3 MOBILE CONTROL OVERHAUL */
+.touch-drive{position:absolute;right:18px;bottom:18px;display:none;gap:12px;pointer-events:auto;z-index:4;align-items:end}
+.touch-drive button{width:112px;height:92px;border:1px solid #ffffff30;border-radius:24px;color:#fff;font-weight:1000;font-size:15px;letter-spacing:.5px;box-shadow:0 10px 30px #000b, inset 0 1px #ffffff18;touch-action:none;-webkit-tap-highlight-color:transparent}
+#touchAccelerate{background:linear-gradient(145deg,#008cff,#00cfff);box-shadow:0 0 24px #008cff55,0 10px 30px #000b}
+#touchBrake{background:linear-gradient(145deg,#7d102b,#d51f4d)}
+.touch-drive button.held{transform:scale(.96);filter:brightness(1.2)}
+.touch-controls{gap:16px}
+.touch-controls .steer-btn{width:96px!important;height:96px!important;font-size:42px!important;border-radius:28px!important;background:linear-gradient(145deg,#101f3c,#071225)!important}
+.touch-controls #touchDrift{width:92px!important;height:84px!important}
+.actions #sab.item-empty,.touch-actions #touchItem.item-empty{background:#351532!important;color:#9b7893!important;box-shadow:none!important;filter:saturate(.45) brightness(.65);opacity:.72}
+.actions #sab.item-ready,.touch-actions #touchItem.item-ready{background:linear-gradient(135deg,#ff1493,#ff4edb)!important;color:#fff;box-shadow:0 0 25px #ff25d988,0 8px 22px #0008!important;animation:itemPulse 1.15s ease-in-out infinite}
+@keyframes itemPulse{50%{filter:brightness(1.15);transform:translateY(-1px)}}
+.score{transform:scale(.86);transform-origin:top left;opacity:.9}
+.race-player{width:185px;min-height:31px;margin:2px 0;padding:3px 7px;grid-template-columns:17px 27px 1fr}
+.race-player img{width:24px;height:24px}.race-player b{font-size:9px}.race-rank{font-size:10px}
+@media (pointer:coarse) and (orientation:landscape){
+ .touch-drive{display:flex}
+ .touch-controls{left:18px;bottom:18px}
+ .touch-actions{right:18px;bottom:122px}
+ .touch-actions button{width:94px!important;height:62px!important;font-size:13px}
+ .mini{top:44px;width:120px;height:68px}
+ .score{top:38px;transform:scale(.72);opacity:.82}
+ .energy{left:18px;bottom:126px;width:210px}
+ .speed-box{right:18px;bottom:18px}
+}
+@media (max-width:850px) and (orientation:landscape){
+ .touch-drive button{width:105px;height:84px}
+ .touch-controls .steer-btn{width:88px!important;height:88px!important}
+}

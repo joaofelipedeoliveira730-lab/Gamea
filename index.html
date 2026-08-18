@@ -46,7 +46,7 @@
     </div>
     <div id="authMsg"></div>
   </div>
-  <div class="version">NEON PATH RACING • V9.1 • OTIMIZADO</div>
+  <div class="version">NEON PATH RACING • V9.3 • CONTROLES E CORREÇÕES</div>
 </section>
 
 <div id="app" hidden>
@@ -112,11 +112,12 @@
   <div class="energy"><span>TURBO</span><div><i id="bar"></i></div><small>SHIFT / ESPAÇO</small></div>
   <div class="actions"><button id="turbo">TURBO</button><button id="sab">ITEM</button></div>
   <div class="touch-controls">
-   <button id="touchLeft" aria-label="Virar para esquerda">◀</button>
+   <button id="touchLeft" class="steer-btn" aria-label="Virar para esquerda">◀</button>
    <button id="touchDrift" aria-label="Derrapar">DRIFT</button>
-   <button id="touchRight" aria-label="Virar para direita">▶</button>
+   <button id="touchRight" class="steer-btn" aria-label="Virar para direita">▶</button>
   </div>
-  <div class="touch-actions"><button id="touchTurbo">TURBO</button><button id="touchItem">ITEM</button></div><button id="raceExit" class="race-exit" aria-label="Sair da corrida">SAIR</button>
+  <div class="touch-drive"><button id="touchBrake" aria-label="Freio">FREIO</button><button id="touchAccelerate" aria-label="Acelerar">ACELERAR</button></div>
+  <div class="touch-actions"><button id="touchTurbo">TURBO</button><button id="touchItem" class="item-empty">ITEM</button></div><button id="raceExit" class="race-exit" aria-label="Sair da corrida">SAIR</button>
  </div>
 </section>
 

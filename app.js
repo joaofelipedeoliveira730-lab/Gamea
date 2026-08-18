@@ -13,7 +13,7 @@ function effectiveQuality(){
 let authToken=localStorage.getItem("neon_token")||"";
 let currentUser="Piloto", selectedCharacter=0, selectedTrack="neon-city", pendingAction="quick";
 let renderer,scene,camera,clock,playerMeshes=new Map(),itemBoxes=[],worldGroup,particles,trackDef,lastState,lastRaceStart=0,gameRunning=false,roomMode="room",trackBackdrop=null,trackTextureLoader=new THREE.TextureLoader(),backdropPromise=Promise.resolve();
-let keys={left:false,right:false,drift:false}, touchTimer=null, cameraTarget=new THREE.Vector3(), cameraLook=new THREE.Vector3(), renderFrame=0;
+let keys={left:false,right:false,drift:false,accelerate:false,brake:false}, touchTimer=null, cameraTarget=new THREE.Vector3(), cameraLook=new THREE.Vector3(), renderFrame=0;
 
 const CHARACTERS=[
  {id:1,name:"SPARK",icon:"🤖",portrait:"/resources/portraits/1-spark.svg",color:"#38d9ff",stats:[78,76,72,88]},
@@ -428,10 +428,12 @@ function buildParticles(){
  geo.setAttribute("position",new THREE.BufferAttribute(a,3));particles=new THREE.Points(geo,new THREE.PointsMaterial({color:0x8ddfff,size:q==="low"?.07:.12,transparent:true,opacity:.55,depthWrite:false}));scene.add(particles);
 }
 async function startGame(id){
- gameRunning=true;playerMeshes.clear();trackDef=TRACKS.find(t=>t.id===id)||TRACKS[0];
- showLoading(trackDef.id);
- const loadingStarted=performance.now();
- setupRenderer();
+ try{
+  gameRunning=true;playerMeshes.clear();trackDef=TRACKS.find(t=>t.id===id)||TRACKS[0];
+  showLoading(trackDef.id);
+  const loadingStarted=performance.now();
+  setupRenderer();
+  lastFrameTime=performance.now();
  const q=effectiveQuality();
  scene.background=new THREE.Color(trackDef.colors[0]);scene.fog=new THREE.Fog(trackDef.colors[0],q==='low'?48:62,q==='high'?210:170);
  scene.add(new THREE.HemisphereLight(0xb7d8ff,0x24402d,q==='high'?3.0:2.2));
@@ -446,8 +448,20 @@ async function startGame(id){
  if(elapsed<450)await new Promise(r=>setTimeout(r,450-elapsed));
  $('loadFill').style.width='100%';
  show('game');
- lastRaceStart=Date.now();
- animate();
+  lastRaceStart=Date.now();
+  lastFrameTime=performance.now();
+  animate();
+ }catch(err){
+  console.error('NEON PATH race boot failed',err);
+  gameRunning=false;
+  document.querySelector('.loading-shell')?.classList.remove('slow');
+  $('loadingTitle').textContent='RECUPERANDO A PISTA';
+  $('loadingSub').textContent='O MOTOR 3D ENCONTROU UM ERRO. TENTANDO NOVAMENTE...';
+  $('loadFill').style.width='55%';
+  setTimeout(()=>{
+   if(!gameRunning) startGame(trackDef?.id||selectedTrack);
+  },700);
+ }
 }
 function updateCars(s,dt=.016){
  const sorted=[...s.players].sort((a,b)=>b.progress-a.progress);
@@ -465,6 +479,8 @@ function updateCars(s,dt=.016){
   cameraTarget.set(me.x-Math.sin(me.a)*behind,3.65,me.y-Math.cos(me.a)*behind);camera.position.lerp(cameraTarget,Math.min(1,0.18));
   cameraLook.set(me.x+Math.sin(me.a)*ahead,1.25,me.y+Math.cos(me.a)*ahead);camera.lookAt(cameraLook);
   $('bar').style.width=me.energy+'%';$('speed').textContent=String(Math.round(me.speed*12)).padStart(3,'0');$('lap').textContent=`VOLTA ${Math.min(me.lap,3)}/3`;
+  const itemReady=!!me.itemReady;
+  for(const id of ['sab','touchItem']){const b=$(id);if(!b)continue;b.classList.toggle('item-ready',itemReady);b.classList.toggle('item-empty',!itemReady);b.setAttribute('aria-disabled',String(!itemReady));b.title=itemReady?'ITEM PRONTO':'ITEM INDISPONÍVEL';}
  }
  drawMap(s);
 }
@@ -483,14 +499,16 @@ function animate(){
 }
 function resize(){if(!renderer||!camera)return;camera.aspect=innerWidth/innerHeight;camera.updateProjectionMatrix();renderer.setSize(innerWidth,innerHeight,false);}
 function emitSteer(type){if(socket.connected)socket.emit('input',{type});}
-addEventListener('keydown',e=>{if(e.repeat)return;if(e.key==='ArrowLeft'||e.key.toLowerCase()==='a'){keys.left=true;emitSteer('left')}if(e.key==='ArrowRight'||e.key.toLowerCase()==='d'){keys.right=true;emitSteer('right')}if(e.code==='Space'||e.key.toLowerCase()==='shift'){if(socket.connected)socket.emit('input',{type:'turbo'});}
+addEventListener('keydown',e=>{if(e.repeat)return;if(e.key==='ArrowLeft'||e.key.toLowerCase()==='a'){keys.left=true;emitSteer('left')}if(e.key==='ArrowRight'||e.key.toLowerCase()==='d'){keys.right=true;emitSteer('right')}if(e.key.toLowerCase()==='w'||e.key==='ArrowUp')socket.connected&&socket.emit('input',{type:'throttle',active:true});if(e.key.toLowerCase()==='s'||e.key==='ArrowDown')socket.connected&&socket.emit('input',{type:'brake',active:true});if(e.code==='Space'||e.key.toLowerCase()==='shift'){if(socket.connected)socket.emit('input',{type:'turbo'});}
  if(e.key.toLowerCase()==='x'){if(socket.connected)socket.emit('input',{type:'drift',active:true});}});
-addEventListener('keyup',e=>{if(e.key==='ArrowLeft'||e.key.toLowerCase()==='a')keys.left=false;if(e.key==='ArrowRight'||e.key.toLowerCase()==='d')keys.right=false;if(e.key.toLowerCase()==='x'&&socket.connected)socket.emit('input',{type:'drift',active:false});if(!keys.left&&!keys.right)emitSteer('neutral');});
+addEventListener('keyup',e=>{if(e.key==='ArrowLeft'||e.key.toLowerCase()==='a')keys.left=false;if(e.key==='ArrowRight'||e.key.toLowerCase()==='d')keys.right=false;if((e.key.toLowerCase()==='w'||e.key==='ArrowUp')&&socket.connected)socket.emit('input',{type:'throttle',active:false});if((e.key.toLowerCase()==='s'||e.key==='ArrowDown')&&socket.connected)socket.emit('input',{type:'brake',active:false});if(e.key.toLowerCase()==='x'&&socket.connected)socket.emit('input',{type:'drift',active:false});if(!keys.left&&!keys.right)emitSteer('neutral');});
 function bindHold(id,type){const b=$(id);if(!b)return;const stop=e=>{e?.preventDefault?.();b.releasePointerCapture?.(e.pointerId);clearInterval(b.__hold);emitSteer('neutral');};b.onpointerdown=e=>{e.preventDefault();b.setPointerCapture?.(e.pointerId);emitSteer(type);clearInterval(b.__hold);b.__hold=setInterval(()=>emitSteer(type),90);};b.onpointerup=stop;b.onpointercancel=stop;b.onpointerleave=e=>{if(e.buttons===0)stop(e);};}
 function bindDrift(id){const b=$(id);if(!b)return;const stop=e=>{e?.preventDefault?.();b.releasePointerCapture?.(e.pointerId);clearInterval(b.__hold);socket.connected&&socket.emit('input',{type:'drift',active:false});b.classList.remove('held');};b.onpointerdown=e=>{e.preventDefault();b.setPointerCapture?.(e.pointerId);b.classList.add('held');socket.connected&&socket.emit('input',{type:'drift',active:true});};b.onpointerup=stop;b.onpointercancel=stop;b.onpointerleave=e=>{if(e.buttons===0)stop(e);};}
+function bindActionHold(id,type){const b=$(id);if(!b)return;const stop=e=>{e?.preventDefault?.();b.releasePointerCapture?.(e.pointerId);socket.connected&&socket.emit('input',{type,active:false});b.classList.remove('held');};b.onpointerdown=e=>{e.preventDefault();b.setPointerCapture?.(e.pointerId);b.classList.add('held');socket.connected&&socket.emit('input',{type,active:true});};b.onpointerup=stop;b.onpointercancel=stop;b.onpointerleave=e=>{if(e.buttons===0)stop(e);};}
 bindHold('touchLeft','left');bindHold('touchRight','right');bindDrift('touchDrift');
-$('turbo').onclick=()=>socket.connected&&socket.emit('input',{type:'turbo'});$('sab').onclick=()=>socket.connected&&socket.emit('input',{type:'sabotage'});
-$('touchTurbo').onclick=()=>socket.connected&&socket.emit('input',{type:'turbo'});$('touchItem').onclick=()=>socket.connected&&socket.emit('input',{type:'sabotage'});
+$('turbo').onclick=()=>socket.connected&&socket.emit('input',{type:'turbo'});$('sab').onclick=()=>socket.connected&&$('sab').classList.contains('item-ready')&&socket.emit('input',{type:'sabotage'});
+$('touchTurbo').onclick=()=>socket.connected&&socket.emit('input',{type:'turbo'});$('touchItem').onclick=()=>socket.connected&&$('touchItem').classList.contains('item-ready')&&socket.emit('input',{type:'sabotage'});
+bindActionHold('touchAccelerate','throttle');bindActionHold('touchBrake','brake');
 function exitRace(){gameRunning=false;try{socket.emit("room:leave");}catch{}playerMeshes.clear();if(scene){scene.traverse(o=>{if(o.geometry)o.geometry.dispose?.();if(o.material){const ms=Array.isArray(o.material)?o.material:[o.material];ms.forEach(m=>{m.map?.dispose?.();m.dispose?.();});}});}show("menu");message("Você saiu da corrida.");}
 $("raceExit").onclick=exitRace;
 function showFinish(results,track){
