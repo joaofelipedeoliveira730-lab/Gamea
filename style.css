@@ -66,3 +66,10 @@
  body>#app,body>#termsGate,body>#authPanel{visibility:hidden}
 }
 @media (orientation:landscape){#rotateNotice{display:none}}
+
+/* V9 RACE PRESENTATION / MOBILE SAFETY */
+#countdown{z-index:12;font-family:Impact,Arial Black,sans-serif;font-style:italic;letter-spacing:3px;color:#fff;text-shadow:0 8px 0 #111,0 0 35px #00eaff,0 0 80px #ff25d9;transform:scale(1);transition:transform .15s}.countdown.go{color:#ffe600;text-shadow:0 6px 0 #6b3500,0 0 35px #ffe600;animation:goPop .65s ease-out}@keyframes goPop{0%{transform:scale(.45);opacity:.2}45%{transform:scale(1.12);opacity:1}100%{transform:scale(1)}}
+.touch-controls button,.touch-actions button{min-height:58px;touch-action:none;-webkit-tap-highlight-color:transparent}.touch-controls #touchDrift{background:linear-gradient(135deg,#ff7a00dd,#ff2bd6dd);font-size:14px;font-weight:1000}.touch-controls #touchDrift.held{box-shadow:0 0 0 3px #ffe60066,0 0 30px #ff25d9aa;transform:scale(.96)}
+#game:before{content:"";position:absolute;inset:0;pointer-events:none;background:radial-gradient(circle at 50% 45%,transparent 45%,#0005 100%);z-index:1}.race-hud{z-index:2}.race-vignette{z-index:1}
+@media (pointer:coarse) and (orientation:landscape){.touch-controls{gap:9px}.touch-controls button{width:68px;height:68px}.touch-actions{gap:8px}.touch-actions button{width:82px;height:58px;font-size:12px}.race-exit{z-index:3}}
+@media (orientation:portrait){#rotateNotice{z-index:9999!important;display:grid!important}.rotate-card{max-width:92vw}.rotate-card h2{font-family:Impact,Arial Black,sans-serif;letter-spacing:2px;font-size:28px}.rotate-card p{line-height:1.5;opacity:.75}}

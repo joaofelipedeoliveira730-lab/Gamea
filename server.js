@@ -305,7 +305,7 @@ function spawn(i){
   const lane=(i%4-1.5)*2.1;
   return {id:null,nickname:'Piloto',characterId:(i%8)+1,color:colors[i%colors.length],
     progress:Math.max(0,i*0.008),lane,steer:0,speed:0,energy:100,boost:0,alive:true,
-    trail:[],kills:0,lastInput:0,lastTurbo:0,lastSab:0,lap:1,finish:null};
+    trail:[],kills:0,lastInput:0,lastTurbo:0,lastSab:0,lap:1,finish:null,drift:false,driftCharge:0,driftLevel:0,boostTimer:0,checkpoint:0,rocketBoost:0};
 }
 function posFor(p,t){
   const theta=(p.progress%1)*Math.PI*2;
@@ -319,16 +319,18 @@ function snap(r){
   return {code:r.code,mode:r.mode,solo:r.mode==='solo',roomName:r.roomName||'',running:r.running,started:r.started,track:r.track,trackName:t.name,
     players:[...r.players.values()].map(p=>{const q=posFor(p,t);return{
       id:p.id,nickname:p.nickname,characterId:p.characterId||1,x:q.x,y:q.z,a:q.a,speed:p.speed,energy:p.energy,boost:p.boost,
-      alive:p.alive,trail:p.trail.slice(-80),kills:p.kills,color:p.color,lap:p.lap,finish:p.finish,progress:p.progress,lane:p.lane
+      alive:p.alive,trail:p.trail.slice(-80),kills:p.kills,color:p.color,lap:p.lap,finish:p.finish,progress:p.progress,lane:p.lane,drift:p.drift,driftLevel:p.driftLevel
     }})};
 }
 function start(r){
   if(r.running)return;
-  r.running=true;r.started=Date.now();r.finishOrder=[];
+  r.running=true;r.started=Date.now();r.finishOrder=[];r.countdownUntil=Date.now()+3600;
   let i=0;
   for(const p of r.players.values()){const characterId=p.characterId||((i)%8)+1;Object.assign(p,spawn(i++),{id:p.id,nickname:p.nickname,color:p.color,characterId});}
   io.to(r.code).emit('race:loading',{track:r.track});
-  setTimeout(()=>io.to(r.code).emit('start',{code:r.code,track:r.track}),900);
+  [3,2,1].forEach((v,i)=>setTimeout(()=>io.to(r.code).emit('race:countdown',{value:v}),i*1000));
+  setTimeout(()=>io.to(r.code).emit('race:countdown',{value:'GO'}),3000);
+  setTimeout(()=>io.to(r.code).emit('start',{code:r.code,track:r.track}),120);
 }
 function finishPlayer(p,r){
   if(p.finish)return;
@@ -413,7 +415,8 @@ io.on('connection',s=>{
     if(type==='left')p.steer=-1;
     if(type==='right')p.steer=1;
     if(type==='neutral')p.steer=0;
-    if(type==='turbo'&&p.energy>=20&&now-p.lastTurbo>850){p.energy-=20;p.boost=1.55;p.lastTurbo=now;}
+    if(type==='drift'){p.drift=!!m?.active;if(!p.drift&&p.driftCharge>=18){p.boostTimer=p.driftLevel>=2?1.25:0.75;p.boost=1.25;}if(!p.drift){p.driftCharge=0;p.driftLevel=0;}}
+    if(type==='turbo'&&now<=(r.countdownUntil||0)+250&&now>=(r.countdownUntil||0)-2400){p.rocketBoost=1;p.energy=Math.max(0,p.energy-20);p.boost=1.65;p.lastTurbo=now;} else if(type==='turbo'&&p.energy>=20&&now-p.lastTurbo>850){p.energy-=20;p.boost=1.55;p.lastTurbo=now;}
     if(type==='sabotage'&&p.energy>=30&&now-p.lastSab>8000){
       p.energy-=30;p.lastSab=now;
       let target=null,best=999;
@@ -444,6 +447,8 @@ setInterval(()=>{
     const t=trackById(r.track),dt=TICK/1000;
     for(const p of r.players.values()){
       if(!p.alive)continue;
+      // Ninguém se move antes do GO: evita a largada atravessada e sincroniza todos os clientes.
+      if(now < (r.countdownUntil||0)) continue;
       if(p.bot){
         // Bots follow the racing line with bounded variation, then make tactical lane changes.
         const phase=(now-r.started)/1100+p.id.length*0.73;
@@ -452,14 +457,23 @@ setInterval(()=>{
         if(p.energy>=20 && Math.random()<0.024){p.energy-=20;p.boost=1.55;}
       }
       const rubber=(p.bot?1+Math.max(-.045,Math.min(.045,(0.5-p.progress))*0.35):1);
-      const target=(p.bot?13.7*p.botSkill:13.5)*rubber+(p.boost>0?7.5:0);
+      if(p.drift && Math.abs(p.steer)>0){p.driftCharge++;p.driftLevel=p.driftCharge>=70?2:p.driftCharge>=30?1:0;}
+      const offroad=Math.abs(p.lane)>5.7;
+      const driftBonus=p.driftLevel>=2?1.8:p.driftLevel>=1?.8:0;
+      const target=(p.bot?13.7*p.botSkill:13.5)*rubber+(p.boost>0?7.5:0)+driftBonus;
+      if(offroad)p.speed*=.92;
       p.speed+=(target-p.speed)*.12;
       p.lane+=p.steer*dt*8;
       p.lane*=.986;
-      p.lane=Math.max(-6,Math.min(6,p.lane));
+      p.lane=Math.max(-7.5,Math.min(7.5,p.lane));
       p.progress+=p.speed*dt/(2*Math.PI*Math.max(t.rx,t.rz)*1.05);
-      if(p.progress>=1){p.progress-=1;p.lap++;if(p.lap>3)finishPlayer(p,r);}
-      p.energy=Math.min(100,p.energy+5*dt);p.boost=Math.max(0,p.boost-dt);
+      if(p.progress>=1){
+        p.progress-=1;
+        if(p.checkpoint>=3){p.lap++;p.checkpoint=0;if(p.lap>3)finishPlayer(p,r);}
+      }
+      const cp=Math.min(3,Math.floor(p.progress*4));
+      if(cp>=p.checkpoint)p.checkpoint=cp;
+      p.energy=Math.min(100,p.energy+5*dt);p.boost=Math.max(0,p.boost-dt);p.boostTimer=Math.max(0,p.boostTimer-dt);if(p.boostTimer>0)p.boost=Math.max(p.boost,1.1);
       const q=posFor(p,t);p.trail.push([+q.x.toFixed(2),+q.z.toFixed(2)]);if(p.trail.length>80)p.trail.shift();
     }
     io.to(r.code).emit('state',snap(r));

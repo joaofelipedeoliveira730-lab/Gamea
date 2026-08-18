@@ -8,7 +8,7 @@ const server=fs.readFileSync('server.js','utf8');
 const manifest=JSON.parse(fs.readFileSync('assets-manifest.json','utf8'));
 
 // ================= STATIC QA =================
-for(const id of ['modePanel','modeSolo','modePrivate','modeJoin','roomNameInput','roomPasswordInput','roomCodeInput','termsGate','termsAccept','downloadResources','rotateFullscreen','loading','finish','ceoBtn','shopBtn','touchLeft','touchRight','touchTurbo','touchItem','raceExit'])
+for(const id of ['modePanel','modeSolo','modePrivate','modeJoin','roomNameInput','roomPasswordInput','roomCodeInput','termsGate','termsAccept','downloadResources','rotateFullscreen','loading','finish','ceoBtn','shopBtn','touchLeft','touchRight','touchTurbo','touchItem','touchDrift','raceExit'])
   assert(html.includes(`id="${id}"`),`${id} missing`);
 assert(html.includes('INDISPONÍVEL NO MOMENTO'),'shop unavailable state missing');
 assert(app.includes('requestFullscreenLandscape'),'fullscreen/orientation helper missing');
@@ -30,7 +30,7 @@ assert(server.includes('function roomPasswordHash'),'room password hash missing'
 assert(server.includes('Senha da sala incorreta'),'wrong password protection missing');
 assert(server.includes('r.ownerId===s.id'),'room owner authorization missing');
 assert(server.includes("if(now-p.lastInput<45)return"),'input rate limit missing');
-assert(server.includes('p.lane=Math.max(-6,Math.min(6,p.lane))'),'server lane clamp missing');
+assert(server.includes('p.lane=Math.max(-7.5,Math.min(7.5,p.lane))'),'server lane clamp missing');
 assert(!/bot:\s*p\.bot/.test(server),'bot flag must not be exposed');
 assert(manifest.hd_scenes.length===8,'8 HD scene assets missing');
 assert(manifest.portraits.length===8,'8 portrait assets missing');
@@ -98,6 +98,13 @@ assert(!server.includes('m.target'),'server must not trust a client-selected sab
 assert(!server.includes('m.x') && !server.includes('m.y'),'server must not trust client coordinates');
 
 assert(app.includes('addTrackRibbon'),'3D track ribbon pipeline missing');
+assert(app.includes('addItemBoxes'),'item box visuals missing');
+assert(app.includes('countdown'),'race countdown UI missing');
+assert(app.includes('touchDrift'),'mobile drift control missing');
+assert(server.includes('countdownUntil'),'server countdown synchronization missing');
+assert(server.includes('driftCharge'),'server drift system missing');
+assert(server.includes('checkpoint'),'checkpoint validation missing');
+assert(!app.includes('roadTexture'), 'road must not use arbitrary scenery photos as asphalt texture');
 assert(app.includes('webglcontextlost'),'WebGL context recovery missing');
 assert(app.includes('characterId:selectedCharacter'),'selected character not sent to race');
 assert(server.includes('characterId:p.characterId||1'),'character identity not exposed to HUD safely');
