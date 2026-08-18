@@ -23,7 +23,7 @@ Set the Render backend URL in `config.js`.
 Create a PostgreSQL database and a Web Service.
 - Runtime: Node
 - Build: `npm install`
-- Start: `npm start`
+- Start: `npm start` (executa `node server.js` na raiz)
 - Environment: `DATABASE_URL`, `PUBLIC_ORIGIN`
 
 The backend also serves `client/`, so the Render service itself is a playable fallback.
