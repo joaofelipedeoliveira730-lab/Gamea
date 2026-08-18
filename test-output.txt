@@ -1,0 +1,9 @@
+
+> neon-path@9.5.0 test
+> node test.js
+
+NEON PATH 9.4 QA: OK
+RACE SIMULATION: 300 complete races across 3 modes x 8 maps
+SECURITY SIMULATION: private passwords, owner-only start, hidden AI, input clamping/rate-limit model: OK
+MOBILE QA: landscape lock helper + touch steering/turbo/item controls present + WebGL recovery
+RESOURCE QA: original resources preserved + existing HD scene SVGs + portraits: OK

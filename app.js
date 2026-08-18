@@ -85,7 +85,7 @@ async function auth(mode){
  }catch(e){$("authMsg").textContent="Não foi possível entrar: "+e.message;}
 }
 async function enterApp(){
- $("authPanel").hidden=true;$ ("app").hidden=false;
+ $("authPanel").hidden=true;$("app").hidden=false;
  try{const p=await api("/api/profile");currentUser=p.nickname||currentUser;$("menuNick").textContent=currentUser;$("menuLevel").textContent=p.level||1;$("menuCoins").textContent=(p.bruto_coins||0).toLocaleString("pt-BR");}catch{}
  if(localStorage.getItem("neon_terms_v1")!=="accepted") return showTermsGate();
  show("menu");
@@ -115,7 +115,7 @@ function openPrivate(create=true){
  $("privateMsg").textContent="";
 }
 function closePrivate(){ $("privatePanel").classList.add("hidden"); }
-$("charactersBtn").onclick=openCharacters;$("garageBtn").onclick=openCharacters;$("mapsBtn").onclick=openTracks;
+$("charactersBtn").onclick=openCharacters;$("mapsBtn").onclick=openTracks;
 $("selectBack").onclick=()=>show("menu");$("tracksBack").onclick=()=>show("select");
 $("selectContinue").onclick=()=>openTracks();
 $("trackReady").onclick=()=>{ if(pendingAction==="solo") beginRoom(false,true); else if(pendingAction==="ceo") beginRoom(true,false); };
@@ -442,6 +442,35 @@ function buildParticles(){
  for(let i=0;i<n;i++){a[i*3]=(Math.random()-.5)*170;a[i*3+1]=2+Math.random()*25;a[i*3+2]=(Math.random()-.5)*130}
  geo.setAttribute("position",new THREE.BufferAttribute(a,3));particles=new THREE.Points(geo,new THREE.PointsMaterial({color:0x8ddfff,size:q==="low"?.07:.12,transparent:true,opacity:.55,depthWrite:false}));scene.add(particles);
 }
+function disposeRaceWorld(){
+  if(!scene)return;
+  for(const obj of [...scene.children]){
+    if(obj===trackBackdrop || obj===worldGroup || obj===environmentGroup || obj===particles || obj.isLight){
+      scene.remove(obj);
+      obj.traverse?.(o=>{try{o.geometry?.dispose?.();if(o.material){const ms=Array.isArray(o.material)?o.material:[o.material];ms.forEach(m=>{m.map?.dispose?.();m.dispose?.();});}}catch{}});
+    }
+  }
+  playerMeshes.clear();itemBoxes=[];worldGroup=null;environmentGroup=null;particles=null;trackBackdrop=null;
+}
+function buildEmergencyTrack(t){
+  disposeRaceWorld();
+  worldGroup=new THREE.Group();scene.add(worldGroup);
+  const rx=48,rz=28;
+  const ground=addBox(worldGroup,0,-1,0,220,1.4,180,0x173a31);ground.receiveShadow=true;
+  const shoulder=addTrackRibbon(worldGroup,rx,rz,24,0x315a54,.03,null,96);shoulder.material.roughness=1;
+  const road=addTrackRibbon(worldGroup,rx,rz,17.5,0x242830,.10,null,96);road.material.roughness=.95;
+  addLaneMarks(worldGroup,rx,rz,-2.8,36,0xf8fbff);addLaneMarks(worldGroup,rx,rz,2.8,36,0xf8fbff);
+  addTrackEdge(worldGroup,rx,rz,9.5,0x111827,.14,96);addStartGrid(worldGroup,rx,rz);addGuardRail(worldGroup,rx,rz,10.4,0x00dfff);
+  buildParticles();
+}
+function buildRaceWorldSafe(t){
+  try{buildTrack(t);buildParticles();return true;}
+  catch(err){
+    console.error('NEON PATH 3D world detail failed; using emergency track:',err);
+    try{buildEmergencyTrack(t);return false;}catch(fatal){console.error('NEON PATH emergency track failed:',fatal);return false;}
+  }
+}
+
 async function startGame(id){
  try{
   if(loadingTimer){clearInterval(loadingTimer);loadingTimer=null;}
@@ -455,7 +484,8 @@ async function startGame(id){
  scene.add(new THREE.HemisphereLight(0xb7d8ff,0x24402d,q==='high'?3.0:2.2));
  scene.add(new THREE.AmbientLight(0xffffff,q==='low'?.45:.7));
  const sun=new THREE.DirectionalLight(0xffffff,q==='high'?2.8:2.15);sun.position.set(30,55,25);sun.castShadow=q!=='low';if(sun.shadow){sun.shadow.mapSize.set(q==='high'?1536:1024,q==='high'?1536:1024);sun.shadow.camera.near=1;sun.shadow.camera.far=140;sun.shadow.camera.left=-70;sun.shadow.camera.right=70;sun.shadow.camera.top=70;sun.shadow.camera.bottom=-70;}scene.add(sun);
- buildTrack(trackDef);buildParticles();window.onresize=resize;
+ const fullWorld=buildRaceWorldSafe(trackDef);window.onresize=resize;
+  if(!fullWorld) $("loadingSub").textContent="PISTA CARREGADA EM MODO SEGURO...";
  let slow=false;
  const slowTimer=setTimeout(()=>{slow=true;$('loadingSub').textContent='AINDA CARREGANDO... OTIMIZANDO O CENÁRIO';document.querySelector('.loading-shell')?.classList.add('slow');},3000);
  // Cenário remoto nunca pode bloquear a corrida inteira.
@@ -473,14 +503,25 @@ async function startGame(id){
   console.error('NEON PATH race boot failed',err);
   gameRunning=false;
   document.querySelector('.loading-shell')?.classList.remove('slow');
-  $('loadingTitle').textContent='RECUPERANDO A PISTA';
-  $('loadingSub').textContent='O MOTOR 3D ENCONTROU UM ERRO. TENTANDO NOVAMENTE...';
-  $('loadFill').style.width='55%';
-  setTimeout(()=>{
-   if(!gameRunning) startGame(trackDef?.id||selectedTrack);
-  },700);
+  $('loadingTitle').textContent='INICIANDO PISTA SEGURA';
+  $('loadingSub').textContent='RECUPERANDO O CENÁRIO SEM TRAVAR A CORRIDA...';
+  $('loadFill').style.width='65%';
+  try{
+    setupRenderer();
+    trackDef=TRACKS.find(t=>t.id===id)||TRACKS[0];
+    scene.background=new THREE.Color(trackDef.colors[0]);
+    scene.fog=new THREE.Fog(trackDef.colors[0],50,170);
+    scene.add(new THREE.HemisphereLight(0xb7d8ff,0x24402d,2.2));
+    const sun=new THREE.DirectionalLight(0xffffff,2.2);sun.position.set(30,55,25);sun.castShadow=false;scene.add(sun);
+    buildEmergencyTrack(trackDef);
+    show('game');lastRaceStart=Date.now();lastFrameTime=performance.now();gameRunning=true;animate();
+  }catch(fatal){
+    console.error('NEON PATH fatal race boot:',fatal);
+    $('loadingSub').textContent='NÃO FOI POSSÍVEL INICIAR O MOTOR 3D. ATUALIZE A PÁGINA.';
+    gameRunning=false;
+  }
  }
-}
+}}
 function updateCars(s,dt=.016){
  const sorted=[...s.players].sort((a,b)=>b.progress-a.progress);
  $('score').innerHTML=sorted.map((p,i)=>{const c=CHARACTERS.find(x=>x.id===p.characterId)||CHARACTERS[i%CHARACTERS.length];return `<div class="race-player" style="--c:${p.color}"><span class="race-rank">${i+1}</span><img src="${c.portrait}" alt=""><b>${escapeHtml(p.nickname)}</b></div>`}).join('');
