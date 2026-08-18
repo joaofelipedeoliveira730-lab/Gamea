@@ -1,6 +1,6 @@
 {
-  "version": "7.0",
-  "download_strategy": "lazy",
+  "version": "8.0",
+  "download_strategy": "lazy-per-race",
   "environment_textures": [
     "resources/environment_01.jpg",
     "resources/environment_02.jpg",
@@ -46,7 +46,7 @@
     "resources/sky_billboard_05.jpg",
     "resources/sky_billboard_06.jpg"
   ],
-  "initial_download": "~2-6MB UI + engine; selected race assets only",
+  "initial_download": "UI + engine + menus; corrida baixa somente o mapa/personagens necessários",
   "quality_profiles": {
     "low": {
       "pixelRatio": 0.75,
@@ -87,5 +87,25 @@
     "resources/arena_detail_115.jpg",
     "resources/arena_detail_116.jpg",
     "resources/arena_detail_117.jpg"
+  ],
+  "hd_scenes": [
+    "resources/hd_scenes/neon-city.svg",
+    "resources/hd_scenes/pirate-bay.svg",
+    "resources/hd_scenes/desert-run.svg",
+    "resources/hd_scenes/mountain-peak.svg",
+    "resources/hd_scenes/space-station.svg",
+    "resources/hd_scenes/jungle-falls.svg",
+    "resources/hd_scenes/volcano-rush.svg",
+    "resources/hd_scenes/ice-world.svg"
+  ],
+  "portraits": [
+    "resources/portraits/1-spark.svg",
+    "resources/portraits/2-luna.svg",
+    "resources/portraits/3-steel.svg",
+    "resources/portraits/4-zippy.svg",
+    "resources/portraits/5-blaze.svg",
+    "resources/portraits/6-frost.svg",
+    "resources/portraits/7-rocky.svg",
+    "resources/portraits/8-nitro.svg"
   ]
 }
