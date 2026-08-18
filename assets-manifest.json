@@ -60,5 +60,25 @@
       "textures": 10,
       "pixelRatio": 1.5
     }
-  }
+  },
+  "arena_detail": [
+    "resources/arena_detail_100.jpg",
+    "resources/arena_detail_101.jpg",
+    "resources/arena_detail_102.jpg",
+    "resources/arena_detail_103.jpg",
+    "resources/arena_detail_104.jpg",
+    "resources/arena_detail_105.jpg",
+    "resources/arena_detail_106.jpg",
+    "resources/arena_detail_107.jpg",
+    "resources/arena_detail_108.jpg",
+    "resources/arena_detail_109.jpg",
+    "resources/arena_detail_110.jpg",
+    "resources/arena_detail_111.jpg",
+    "resources/arena_detail_112.jpg",
+    "resources/arena_detail_113.jpg",
+    "resources/arena_detail_114.jpg",
+    "resources/arena_detail_115.jpg",
+    "resources/arena_detail_116.jpg",
+    "resources/arena_detail_117.jpg"
+  ]
 }

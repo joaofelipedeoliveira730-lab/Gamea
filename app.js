@@ -54,3 +54,67 @@ async function preloadResources(level="auto"){
   }catch(e){}
 }
 preloadResources(quality);
+
+// ===== NEON PATH 5.0 — AUTH / PROFILE =====
+let authToken=localStorage.getItem("neon_token")||"";
+const API_BASE="";
+async function api(path,opts={}){const headers={"Content-Type":"application/json",...(opts.headers||{})};if(authToken)headers.Authorization="Bearer "+authToken;const r=await fetch(API_BASE+path,{...opts,headers});const j=await r.json().catch(()=>({}));if(!r.ok)throw new Error(j.error||"erro");return j;}
+async function auth(mode){
+  const nick=document.getElementById("authNick").value.trim();
+  const email=document.getElementById("authEmail").value.trim();
+  const password=document.getElementById("authPassword").value;
+  const msg=document.getElementById("authMsg");
+  try{
+    const data=await api(mode==="login"?"/api/auth/login":"/api/auth/register",{method:"POST",body:JSON.stringify({username:nick,email,password})});
+    authToken=data.token||data.accessToken||authToken;
+    if(authToken)localStorage.setItem("neon_token",authToken);
+    msg.textContent="CONEXÃO ESTABELECIDA";
+    await renderProfile();
+  }catch(e){msg.textContent="Não foi possível entrar: "+e.message;}
+}
+async function renderProfile(){
+  try{
+    const p=await api("/api/profile");
+    document.getElementById("profilePanel").hidden=false;
+    document.getElementById("authPanel").hidden=true;
+    document.getElementById("profileLevel").textContent=p.level;
+    document.getElementById("profilePrestige").textContent="PRESTÍGIO "+p.prestige;
+    document.getElementById("xpText").textContent="XP "+p.xp;
+    const fill=document.getElementById("xpFill"); if(fill)fill.style.width=Math.min(100,(p.xp/Math.max(1,100*Math.pow(1.12,p.level-1)))*100)+"%";
+    document.getElementById("characterGrid").innerHTML=p.characters.map(c=>`<button class="character-card ${c.selected?"selected":""}" data-character="${c.character_id}" ${c.unlocked?"":"disabled"}>PERSONAGEM ${c.character_id}<small>${c.unlocked?"DESBLOQUEADO":"BLOQUEADO"}</small></button>`).join("");
+    document.querySelectorAll("[data-character]").forEach(b=>b.onclick=async()=>{try{await api("/api/profile/character",{method:"POST",body:JSON.stringify({characterId:Number(b.dataset.character)})});await renderProfile();}catch(e){}});
+  }catch(e){}
+}
+document.getElementById("loginBtn")?.addEventListener("click",()=>auth("login"));
+document.getElementById("registerBtn")?.addEventListener("click",()=>auth("register"));
+renderProfile();
+
+// ===== NEON PATH 6.0 — STORE UI =====
+async function loadShop(){
+ try{
+  const items=await api("/api/shop");
+  const grid=document.getElementById("shopGrid");
+  if(!grid)return;
+  grid.innerHTML=items.map(i=>`<article class="shop-card rarity-${i.rarity}">
+    <div class="item-art item-${i.type}">${i.type==="crown"?"♛":i.type==="trail"?"➤":i.type==="aura"?"✦":i.type==="back"?"◇":"✹"}</div>
+    <b>${i.name}</b><small>${i.rarity.toUpperCase()}</small><strong>${i.price===0?"GRÁTIS":i.price+" BC"}</strong>
+    <button data-buy="${i.code}">${i.price===0?"PEGAR":"COMPRAR"}</button></article>`).join("");
+  grid.querySelectorAll("[data-buy]").forEach(b=>b.onclick=async()=>{
+    try{await api("/api/shop/buy",{method:"POST",body:JSON.stringify({code:b.dataset.buy})});await loadShop();await loadInventory();}
+    catch(e){b.textContent=e.message.toUpperCase();}
+  });
+ }catch(e){}
+}
+async function loadInventory(){
+ try{
+  const items=await api("/api/inventory"), grid=document.getElementById("inventoryGrid"); if(!grid)return;
+  grid.innerHTML=items.length?items.map(i=>`<article class="shop-card ${i.equipped?"equipped":""}">
+    <div class="item-art item-${i.type}">✦</div><b>${i.name}</b><small>${i.equipped?"EQUIPADO":"GUARDADO"}</small>
+    <button data-equip="${i.code}">${i.equipped?"EQUIPADO":"EQUIPAR"}</button></article>`).join(""):"<p>Seu inventário está vazio.</p>";
+  grid.querySelectorAll("[data-equip]").forEach(b=>b.onclick=async()=>{await api("/api/inventory/equip",{method:"POST",body:JSON.stringify({code:b.dataset.equip})});await loadInventory();});
+ }catch(e){}
+}
+document.querySelectorAll("[data-store-tab]").forEach(b=>b.onclick=()=>{
+ const shop=b.dataset.storeTab==="shop";document.getElementById("shopGrid").hidden=!shop;document.getElementById("inventoryGrid").hidden=shop;
+});
+document.getElementById("shopPanel")&&(loadShop(),loadInventory());
