@@ -19,8 +19,8 @@
   addEventListener("resize", resize); resize();
 
   function show(which){
-    [menu,room,leader,result,joinPanel,createPanel].forEach(x=>x.classList.add("hidden"));
-    which.classList.remove("hidden");
+    [menu,room,leader,result,joinPanel,createPanel].filter(Boolean).forEach(x=>x.classList.add("hidden"));
+    if(which) which.classList.remove("hidden");
   }
 
   function backendUrl(){
@@ -77,32 +77,34 @@
     }catch(e){menuMsg.textContent="Servidor indisponível. Confira a URL do Render."}
   }
 
-  $("#joinExistingBtn").onclick=()=>{joinMsg.textContent="";show(joinPanel);$("#roomCodeInput").focus()};
-  $("#joinCancelBtn").onclick=()=>show(menu);
-  $("#joinConfirmBtn").onclick=()=>{
-    const code=($("#roomCodeInput").value||"").trim().toUpperCase();
-    if(!code){joinMsg.textContent="Digite o código da sala.";return}
-    const key=($("#joinKey").value||"").trim();
-    joinMsg.textContent="Conectando...";
-    join("join_room",{roomId:code,key});
-  };
+  const bind = (selector, event, fn) => { const el=$(selector); if(el) el.addEventListener(event, fn); };
 
-  $("#roomBtn").onclick=()=>{createMsg.textContent="";$("#ceoKeyBox").classList.add("hidden");show(createPanel)};
-  $("#normalCreateBtn").onclick=()=>join("create");
-  $("#ceoCreateBtn").onclick=()=>{$("#ceoKeyBox").classList.remove("hidden");$("#ceoKey").focus()};
-  $("#ceoConfirmBtn").onclick=()=>{
-    const key=($("#ceoKey").value||"").trim();
-    if(!key){createMsg.textContent="Digite a chave CEO.";return}
-    createMsg.textContent="Validando chave...";
+  bind("#joinExistingBtn","click",()=>{ if(joinMsg) joinMsg.textContent=""; show(joinPanel); $("#roomCodeInput")?.focus(); });
+  bind("#joinCancelBtn","click",()=>show(menu));
+  bind("#joinConfirmBtn","click",()=>{
+    const code=($("#roomCodeInput")?.value||"").trim().toUpperCase();
+    if(!code){if(joinMsg) joinMsg.textContent="Digite o código da sala.";return}
+    const key=($("#joinKey")?.value||"").trim();
+    if(joinMsg) joinMsg.textContent="Conectando...";
+    join("join_room",{roomId:code,key});
+  });
+
+  bind("#roomBtn","click",()=>{if(createMsg) createMsg.textContent="";$("#ceoKeyBox")?.classList.add("hidden");show(createPanel)});
+  bind("#normalCreateBtn","click",()=>join("create"));
+  bind("#ceoCreateBtn","click",()=>{$("#ceoKeyBox")?.classList.remove("hidden");$("#ceoKey")?.focus()});
+  bind("#ceoConfirmBtn","click",()=>{
+    const key=($("#ceoKey")?.value||"").trim();
+    if(!key){if(createMsg) createMsg.textContent="Digite a chave CEO.";return}
+    if(createMsg) createMsg.textContent="Validando chave...";
     join("create_ceo",{key});
-  };
-  $("#createCancelBtn").onclick=()=>show(menu);
-  $("#leaderBtn").onclick=async()=>{try{await connect();send("leaderboard")}catch{menuMsg.textContent="Servidor indisponível."}};
-  $("#backBtn").onclick=()=>show(menu);
-  $("#startBtn").onclick=()=>send("start");
-  $("#leaveBtn").onclick=()=>{send("leave");show(menu)};
-  $("#againBtn").onclick=()=>{send("rematch");show(room)};
-  $("#resultHomeBtn").onclick=()=>{send("leave");show(menu)};
+  });
+  bind("#createCancelBtn","click",()=>show(menu));
+  bind("#leaderBtn","click",async()=>{try{await connect();send("leaderboard")}catch{menuMsg.textContent="Servidor indisponível."}});
+  bind("#backBtn","click",()=>show(menu));
+  bind("#startBtn","click",()=>send("start"));
+  bind("#leaveBtn","click",()=>{send("leave");show(menu)});
+  bind("#againBtn","click",()=>{send("rematch");show(room)});
+  bind("#resultHomeBtn","click",()=>{send("leave");show(menu)});
 
   addEventListener("keydown", e=>{
     if(["INPUT","TEXTAREA"].includes(document.activeElement?.tagName)) return;

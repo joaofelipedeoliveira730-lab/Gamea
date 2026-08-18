@@ -19,8 +19,8 @@
       </div>
 
       <div class="panel">
-        <label>APELIDO</label>
-        <input id="nickname" maxlength="18" autocomplete="off" placeholder="Digite seu apelido" />
+        <label>SEU APELIDO</label>
+        <input id="nickname" maxlength="18" autocomplete="off" placeholder="Ex.: Velho" />
         <div class="menu-actions">
           <button id="joinExistingBtn" class="primary">ENTRAR EM SALA EXISTENTE</button>
           <button id="roomBtn">CRIAR NOVA SALA</button>
@@ -29,35 +29,44 @@
         <div id="menuMsg" class="msg"></div>
       </div>
 
-      <div id="joinPanel" class="panel hidden">
+      <div class="tips">
+        <span>← → / A D <b>GIRAR</b></span>
+        <span>SPACE <b>TURBO</b></span>
+        <span>E <b>SOPRO</b></span>
+      </div>
+    </section>
+
+    <section id="joinPanel" class="screen hidden">
+      <div class="panel">
+        <div class="room-title">ENTRAR EM <strong>SALA</strong></div>
+        <p class="subtle">Digite o código da sala que seu amigo criou.</p>
         <label>CÓDIGO DA SALA</label>
-        <input id="roomCodeInput" maxlength="8" autocomplete="off" placeholder="Ex.: A7KQ" />
-        <label>CHAVE CEO <small>(somente sala CEO)</small></label>
-        <input id="joinKey" type="password" maxlength="64" autocomplete="off" placeholder="Deixe vazio em sala normal" />
+        <input id="roomCodeInput" maxlength="8" autocomplete="off" placeholder="Ex.: A7K2Q9" />
+        <label style="margin-top:12px">CHAVE DA SALA (SE HOUVER)</label>
+        <input id="joinKey" maxlength="64" autocomplete="off" placeholder="Opcional" />
         <div class="row">
           <button id="joinConfirmBtn" class="primary">ENTRAR</button>
           <button id="joinCancelBtn">VOLTAR</button>
         </div>
         <div id="joinMsg" class="msg"></div>
       </div>
+    </section>
 
-      <div id="createPanel" class="panel hidden">
-        <div class="room-title">CRIAR NOVA SALA</div>
-        <p class="subtle">Escolha uma sala normal ou uma sala exclusiva do CEO.</p>
-        <button id="normalCreateBtn" class="primary">SALA NORMAL</button>
-        <button id="ceoCreateBtn">SALA CEO</button>
+    <section id="createPanel" class="screen hidden">
+      <div class="panel">
+        <div class="room-title">CRIAR <strong>SALA</strong></div>
+        <p class="subtle">Escolha o tipo de sala. A Sala CEO é exclusiva para testes.</p>
+        <div class="menu-actions">
+          <button id="normalCreateBtn" class="primary">SALA PÚBLICA</button>
+          <button id="ceoCreateBtn">SALA CEO • TESTE</button>
+        </div>
         <div id="ceoKeyBox" class="hidden">
           <label>CHAVE CEO</label>
-          <input id="ceoKey" type="password" maxlength="64" autocomplete="off" placeholder="Chave de teste do CEO" />
-          <button id="ceoConfirmBtn" class="primary">CRIAR SALA CEO</button>
+          <input id="ceoKey" type="password" maxlength="64" autocomplete="off" placeholder="Digite a chave" />
+          <button id="ceoConfirmBtn" class="primary" style="width:100%">CRIAR SALA CEO</button>
         </div>
-        <button id="createCancelBtn" class="ghost">VOLTAR</button>
+        <button id="createCancelBtn" class="ghost" style="margin-top:10px">VOLTAR</button>
         <div id="createMsg" class="msg"></div>
-      </div>
-      <div class="tips">
-        <span>← → / A D <b>GIRAR</b></span>
-        <span>SPACE <b>TURBO</b></span>
-        <span>E <b>SOPRO</b></span>
       </div>
     </section>
 
