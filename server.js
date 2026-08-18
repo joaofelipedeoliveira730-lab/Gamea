@@ -288,8 +288,11 @@ const TRACKS=[
 ];
 const colors=['#00f6ff','#ff2bd6','#8cff00','#ffe600','#8b5cff','#ff6b35','#36ff8c','#ff3b6b'];
 function roomCode(){return crypto.randomBytes(3).toString('hex').toUpperCase();}
+function soloCode(){return 'SOLO-'+crypto.randomBytes(4).toString('hex').toUpperCase();}
 function trackById(id){return TRACKS.find(t=>t.id===id)||TRACKS[0];}
-function makeRoom(code,ceo=false){return{code,ceo,players:new Map(),running:false,started:0,track:TRACKS[0].id,created:Date.now(),finishOrder:[]};}
+function makeRoom(code,ceo=false,mode='room'){return{code,ceo,mode,players:new Map(),running:false,started:0,track:TRACKS[0].id,created:Date.now(),finishOrder:[]};}
+const BOT_NAMES=['LUNA','STEEL','ZIPPY','BLAZE','FROST','ROCKY','NITRO'];
+const BOT_SKILLS=[0.94,0.98,1.02,0.96,1.05,0.92,1.00];
 
 /*
  * The server uses a compact, deterministic oval track model.
@@ -311,11 +314,10 @@ function posFor(p,t){
 }
 function snap(r){
   const t=trackById(r.track);
-  return {code:r.code,running:r.running,started:r.started,track:r.track,trackName:t.name,
+  return {code:r.code,mode:r.mode,solo:r.mode==='solo',running:r.running,started:r.started,track:r.track,trackName:t.name,
     players:[...r.players.values()].map(p=>{const q=posFor(p,t);return{
       id:p.id,nickname:p.nickname,x:q.x,y:q.z,a:q.a,speed:p.speed,energy:p.energy,boost:p.boost,
-      alive:p.alive,trail:p.trail.slice(-80),kills:p.kills,color:p.color,lap:p.lap,finish:p.finish,
-      progress:p.progress,lane:p.lane
+      alive:p.alive,trail:p.trail.slice(-80),kills:p.kills,color:p.color,lap:p.lap,finish:p.finish,bot:!!p.bot,progress:p.progress,lane:p.lane
     }})};
 }
 function start(r){
@@ -341,25 +343,34 @@ function finishRace(r){
   io.to(r.code).emit('race:finish',{results,track:r.track});
 }
 io.on('connection',s=>{
-  s.on('room:create',({nickname,ceo,key,track}={})=>{
+  s.on('room:create',({nickname,ceo,key,track,mode}={})=>{
     nickname=cleanNick(nickname)||'Piloto';
+    mode=mode==='solo'?'solo':'room';
     if(ceo&&key!==CEO_KEY)return s.emit('error:game','Chave CEO inválida');
-    const code=ceo?'VELHO202026':roomCode();
-    if(rooms.has(code)&&!ceo)return s.emit('error:game','Sala já existe');
-    const r=makeRoom(code,!!ceo);r.track=trackById(track).id;rooms.set(code,r);
-    const p=spawn(0);Object.assign(p,{id:s.id,nickname,color:colors[0]});r.players.set(s.id,p);
-    s.join(code);s.data.room=code;s.data.ceo=!!ceo;
-    s.emit('room',{code,ceo:r.ceo,track:r.track});io.to(code).emit('state',snap(r));
+    if(ceo)mode='room';
+    const code=ceo?'VELHO202026':mode==='solo'?soloCode():roomCode();
+    const r=makeRoom(code,!!ceo,mode);r.track=trackById(track).id;rooms.set(code,r);
+    const p=spawn(0);Object.assign(p,{id:s.id,nickname,bot:false,color:colors[0]});r.players.set(s.id,p);
+    if(mode==='solo'){
+      for(let i=1;i<MAX;i++){
+        const b=spawn(i);
+        Object.assign(b,{id:`bot-${crypto.randomUUID()}`,nickname:BOT_NAMES[i-1],bot:true,botSkill:BOT_SKILLS[i-1],color:colors[i%colors.length]});
+        r.players.set(b.id,b);
+      }
+    }
+    s.join(code);s.data.room=code;s.data.ceo=!!ceo;s.data.soloOwner=mode==='solo';
+    s.emit('room',{code,ceo:r.ceo,mode:r.mode,solo:r.mode==='solo',track:r.track});io.to(code).emit('state',snap(r));
   });
   s.on('room:join',({code,nickname}={})=>{
     code=String(code||'').trim().toUpperCase();
     if(!code||code.length>15)return s.emit('error:game','Código da sala deve ter no máximo 15 caracteres');
     const r=rooms.get(code);
     if(!r)return s.emit('error:game','Sala não encontrada');
+    if(r.mode==='solo')return s.emit('error:game','Esta é uma corrida SOLO e já está completa. Crie uma nova corrida solo.');
     if(r.running||r.players.size>=MAX)return s.emit('error:game','Sala cheia ou corrida já iniciada');
-    const p=spawn(r.players.size);Object.assign(p,{id:s.id,nickname:cleanNick(nickname)||'Piloto',color:colors[r.players.size]});
+    const p=spawn(r.players.size);Object.assign(p,{id:s.id,nickname:cleanNick(nickname)||'Piloto',bot:false,color:colors[r.players.size]});
     r.players.set(s.id,p);s.join(r.code);s.data.room=r.code;s.data.ceo=false;
-    s.emit('room',{code:r.code,ceo:r.ceo,track:r.track});io.to(r.code).emit('state',snap(r));
+    s.emit('room',{code:r.code,ceo:r.ceo,mode:r.mode,solo:r.mode==='solo',track:r.track});io.to(r.code).emit('state',snap(r));
   });
   s.on('room:track',id=>{
     const r=rooms.get(s.data.room);
@@ -369,7 +380,8 @@ io.on('connection',s=>{
   s.on('room:start',()=>{
     const r=rooms.get(s.data.room);
     if(r&&r.ceo&&s.data.ceo&&r.players.get(s.id))start(r);
-    else if(r&&!r.ceo&&r.players.size===1&&r.players.get(s.id))start(r); // solo test remains easy
+    else if(r&&r.mode==='solo'&&s.data.soloOwner&&r.players.get(s.id))start(r);
+    else if(r&&!r.ceo&&r.mode==='room'&&r.players.size>=1&&r.players.get(s.id))start(r);
   });
   s.on('input',m=>{
     const r=rooms.get(s.data.room),p=r?.players.get(s.id);
@@ -403,7 +415,13 @@ setInterval(()=>{
     const t=trackById(r.track),dt=TICK/1000;
     for(const p of r.players.values()){
       if(!p.alive)continue;
-      const target=13.5+(p.boost>0?7:0);
+      if(p.bot){
+        // Bots are server-authoritative: no client can fake their position.
+        const wave=Math.sin((now-r.started)/900+p.id.length)*0.55;
+        p.steer=wave;
+        if(p.energy>=20 && Math.random()<0.018){p.energy-=20;p.boost=1.55;}
+      }
+      const target=(p.bot?13.5*p.botSkill:13.5)+(p.boost>0?7:0);
       p.speed+=(target-p.speed)*.11;
       p.lane+=p.steer*dt*7;
       p.lane*=.985;

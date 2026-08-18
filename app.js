@@ -5,7 +5,7 @@ const socket=io({transports:["websocket","polling"]});
 let quality=localStorage.getItem("neon_quality")||"auto";
 let authToken=localStorage.getItem("neon_token")||"";
 let currentUser="Piloto", selectedCharacter=0, selectedTrack="neon-city", pendingAction="quick";
-let renderer,scene,camera,clock,playerMeshes=new Map(),worldGroup,particles,trackDef,lastState,lastRaceStart=0,gameRunning=false;
+let renderer,scene,camera,clock,playerMeshes=new Map(),worldGroup,particles,trackDef,lastState,lastRaceStart=0,gameRunning=false,roomMode="room";
 let keys={left:false,right:false}, touchTimer=null;
 
 const CHARACTERS=[
@@ -84,17 +84,20 @@ $("ceoBtn").onclick=()=>{const key=prompt("Chave CEO:");if(!key)return;pendingAc
 async function beginRoom(ceo=false,forceSolo=false){
  currentUser=$("menuNick").textContent||currentUser;
  if(ceo||pendingAction==="ceo")socket.emit("room:create",{nickname:currentUser,ceo:true,key:window.__ceoKey,track:selectedTrack});
- else socket.emit("room:create",{nickname:currentUser,ceo:false,track:selectedTrack});
+ else socket.emit("room:create",{nickname:currentUser,ceo:false,track:selectedTrack,mode:forceSolo||pendingAction==="solo"?"solo":"room"});
 }
 function renderLobby(s){
  $("roomCode").textContent=s.code;$("lobbyTrack").textContent=s.trackName||"NEON CITY";
- $("players").innerHTML=s.players.map((p,i)=>`<div class="p" style="--c:${p.color}"><span><b>${i+1}</b> ${escapeHtml(p.nickname)}</span><strong>${p.alive?"READY":"OUT"}</strong></div>`).join("");
+ $("players").innerHTML=s.players.map((p,i)=>`<div class="p ${p.bot?"bot-player":""}" style="--c:${p.color}"><span><b>${i+1}</b> ${escapeHtml(p.nickname)} ${p.bot?"<small>BOT</small>":""}</span><strong>${p.alive?"READY":"OUT"}</strong></div>`).join("");
 }
 socket.on("connect",()=>message("SERVIDOR ONLINE"));
 socket.on("connect_error",()=>message("Conexão instável — tentando novamente..."));
 socket.on("error:game",x=>{$("lobbyMsg").textContent=x;message(x);});
 socket.on("room",x=>{
- show("lobby");renderLobby({code:x.code,trackName:TRACKS.find(t=>t.id===x.track)?.name||x.track,players:[]});
+ roomMode=x.mode||"room";
+ show("lobby");
+ $("lobbyMode").textContent=roomMode==="solo"?"SOLO • 7 BOTS":"SALA MULTIPLAYER";
+ renderLobby({code:x.code,trackName:TRACKS.find(t=>t.id===x.track)?.name||x.track,players:[]});
  if(x.ceo){$("start").classList.remove("hidden");$("ceoTools").classList.remove("hidden");}
  else if(pendingAction==="solo")$("start").classList.remove("hidden");
  $("ceoTrack").innerHTML=TRACKS.map(t=>`<option value="${t.id}" ${t.id===x.track?"selected":""}>${t.name}</option>`).join("");
