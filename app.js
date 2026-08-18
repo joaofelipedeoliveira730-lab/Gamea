@@ -37,6 +37,31 @@ const api=async(path,opts={})=>{
 function escapeHtml(x){return String(x).replace(/[&<>"']/g,m=>({"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#39;"}[m]));}
 function show(id){document.querySelectorAll("#app>.screen,#app>#game").forEach(e=>e.classList.add("hidden"));$(id)?.classList.remove("hidden");}
 function message(t){$("msg").textContent=t||"";}
+async function requestFullscreenLandscape(){
+ try{ if(!document.fullscreenElement) await document.documentElement.requestFullscreen({navigationUI:"hide"}); }catch{}
+ try{ if(screen.orientation?.lock) await screen.orientation.lock("landscape"); }catch{}
+}
+$("rotateFullscreen").onclick=()=>requestFullscreenLandscape();
+async function showTermsGate(){
+ $("termsGate").classList.remove("hidden");$("termsAccept").checked=false;$("downloadResources").disabled=true;$("continueWithoutDownload").disabled=true;
+ const cached=localStorage.getItem("neon_resources_v1")==="ready";
+ if(cached){$("resourceStatus").textContent="Recursos já preparados neste dispositivo.";$("resourcePercent").textContent="100%";$("downloadResources").textContent="RECURSOS JÁ BAIXADOS";$("downloadResources").disabled=false;$("continueWithoutDownload").disabled=false;}
+}
+async function downloadGameResources(){
+ if(!$("termsAccept").checked)return;
+ $("downloadResources").disabled=true;$("resourceStatus").textContent="Baixando recursos essenciais...";
+ try{
+  const manifest=await fetch("/assets-manifest.json",{cache:"no-store"}).then(r=>r.json());
+  const files=["style.css","app.js",...(manifest.environment_textures||[]).slice(0,10),...(manifest.sky_billboards||[]).slice(0,2),...(manifest.arena_detail||[]).slice(0,4)];
+  const cache=await caches.open("neon-path-resources-v1");let done=0;
+  for(const file of files){try{await cache.add("/"+file)}catch{}done++;const pct=Math.round(done/files.length*100);$("resourcePercent").textContent=pct+"%";$("loadFill")?.style.setProperty("width",pct+"%");}
+  localStorage.setItem("neon_resources_v1","ready");$("resourceStatus").textContent=`Recursos preparados (${files.length} arquivos).`;$("resourcePercent").textContent="100%";$("continueWithoutDownload").disabled=false;$("downloadResources").textContent="RECURSOS PRONTOS";
+ }catch(e){$("resourceStatus").textContent="Não foi possível preparar o cache. Você pode tentar novamente.";$("downloadResources").disabled=false;}
+}
+$("termsAccept").onchange=()=>{$("downloadResources").disabled=!$("termsAccept").checked;};
+$("downloadResources").onclick=downloadGameResources;
+$("continueWithoutDownload").onclick=async()=>{if(localStorage.getItem("neon_resources_v1")!=="ready")return;localStorage.setItem("neon_terms_v1","accepted");$("termsGate").classList.add("hidden");show("menu");await requestFullscreenLandscape();};
+
 function setAuthMode(mode){const login=mode==="login";$("loginForm").classList.toggle("hidden",!login);$("registerForm").classList.toggle("hidden",login);$("showLogin").classList.toggle("active",login);$("showRegister").classList.toggle("active",!login);$("authMsg").textContent="";}
 async function auth(mode){
  const nick=(mode==="login"?$("authNick"):$("registerNick")).value.trim(),pass=(mode==="login"?$("authPassword"):$("registerPassword")).value,email=mode==="register"?$("registerEmail").value.trim():"";
@@ -49,9 +74,11 @@ async function auth(mode){
  }catch(e){$("authMsg").textContent="Não foi possível entrar: "+e.message;}
 }
 async function enterApp(){
- $("authPanel").hidden=true;$("app").hidden=false;
+ $("authPanel").hidden=true;$ ("app").hidden=false;
  try{const p=await api("/api/profile");currentUser=p.nickname||currentUser;$("menuNick").textContent=currentUser;$("menuLevel").textContent=p.level||1;$("menuCoins").textContent=(p.bruto_coins||0).toLocaleString("pt-BR");}catch{}
+ if(localStorage.getItem("neon_terms_v1")!=="accepted") return showTermsGate();
  show("menu");
+ requestFullscreenLandscape();
 }
 $("showLogin").onclick=()=>setAuthMode("login");$("showRegister").onclick=()=>setAuthMode("register");
 $("toRegister").onclick=()=>setAuthMode("register");$("toLogin").onclick=()=>setAuthMode("login");
@@ -60,54 +87,87 @@ setAuthMode("login");
 if(authToken)enterApp();
 
 function renderCharacters(){
- $("characterSelect").innerHTML=CHARACTERS.map(c=>`<button class="character-card ${selectedCharacter===c.id?"selected":""}" data-char="${c.id}">
-   <div class="avatar" style="color:${c.color}">${c.icon}</div><b>${c.name}</b><small>${c.id===1?"INICIAL":"DESBLOQUEÁVEL"}</small></button>`).join("");
+ $("characterSelect").innerHTML=CHARACTERS.map(c=>`<button class="character-card ${selectedCharacter===c.id?"selected":""}" data-char="${c.id}"><div class="avatar" style="color:${c.color}">${c.icon}</div><b>${c.name}</b><small>${c.id===1?"INICIAL":"DESBLOQUEÁVEL"}</small></button>`).join("");
  document.querySelectorAll("[data-char]").forEach(b=>b.onclick=()=>{selectedCharacter=Number(b.dataset.char);renderCharacters();});
 }
 function openCharacters(){renderCharacters();show("select");}
 function renderTracks(){
- $("trackGrid").innerHTML=TRACKS.map(t=>`<button class="track-card ${selectedTrack===t.id?"selected":""}" data-track="${t.id}">
-   <div class="track-art theme-${t.theme}"></div><b>${t.name}</b><small>${t.desc}</small></button>`).join("");
+ $("trackGrid").innerHTML=TRACKS.map(t=>`<button class="track-card ${selectedTrack===t.id?"selected":""}" data-track="${t.id}"><div class="track-art theme-${t.theme}"></div><b>${t.name}</b><small>${t.desc}</small></button>`).join("");
  document.querySelectorAll("[data-track]").forEach(b=>b.onclick=()=>{selectedTrack=b.dataset.track;renderTracks();});
 }
 function openTracks(){renderTracks();show("tracks");}
-$("charactersBtn").onclick=openCharacters;$("garageBtn").onclick=openCharacters;
-$("mapsBtn").onclick=openTracks;
+function openModes(){ $("modePanel").classList.remove("hidden"); }
+function closeModes(){ $("modePanel").classList.add("hidden"); }
+function openPrivate(create=true){
+ $("privatePanel").classList.remove("hidden");
+ $("privateCreateForm").classList.toggle("hidden",!create);$("privateJoinForm").classList.toggle("hidden",create);
+ $("privateCreateTab").classList.toggle("active",create);$("privateJoinTab").classList.toggle("active",!create);
+ $("privateMsg").textContent="";
+}
+function closePrivate(){ $("privatePanel").classList.add("hidden"); }
+$("charactersBtn").onclick=openCharacters;$("garageBtn").onclick=openCharacters;$("mapsBtn").onclick=openTracks;
 $("selectBack").onclick=()=>show("menu");$("tracksBack").onclick=()=>show("select");
 $("selectContinue").onclick=()=>openTracks();
-$("trackReady").onclick=()=>beginRoom(false,false);
-$("playQuick").onclick=()=>{pendingAction="quick";openCharacters()};
-$("soloBtn").onclick=()=>{pendingAction="solo";openCharacters()};
-$("create").onclick=()=>{pendingAction="create";openTracks()};
-$("join").onclick=()=>{const code=$("room").value.trim().toUpperCase();if(!code){message("Digite o código da sala.");return}currentUser=$("menuNick").textContent||currentUser;socket.emit("room:join",{nickname:currentUser,code});};
+$("trackReady").onclick=()=>{ if(pendingAction==="solo") beginRoom(false,true); else if(pendingAction==="ceo") beginRoom(true,false); };
+$("playQuick").onclick=openModes;
+$("soloBtn").onclick=openModes;
+$("create").onclick=()=>openPrivate(true);
+$("join").onclick=()=>openPrivate(false);
+$("modeClose").onclick=closeModes;
+$("modeSolo").onclick=()=>{closeModes();pendingAction="solo";openCharacters();};
+$("modePrivate").onclick=()=>{closeModes();openPrivate(true);};
+$("modeJoin").onclick=()=>{closeModes();openPrivate(false);};
+$("privateClose").onclick=closePrivate;
+$("privateCreateTab").onclick=()=>openPrivate(true);$("privateJoinTab").onclick=()=>openPrivate(false);
+$("privateCreateBtn").onclick=()=>{
+ const name=$("roomNameInput").value.trim(), password=$("roomPasswordInput").value;
+ if(name.length<2){$("privateMsg").textContent="Dê um nome para a sala.";return;}
+ if(password.length<4){$("privateMsg").textContent="A senha deve ter pelo menos 4 caracteres.";return;}
+ closePrivate();pendingAction="create";openCharacters();
+ window.__privateRoom={name,password};
+};
+$("privateJoinBtn").onclick=()=>{
+ const code=$("roomCodeInput").value.trim().toUpperCase(),password=$("roomJoinPassword").value;
+ if(!code){$("privateMsg").textContent="Digite o código da sala.";return;}
+ if(code.length>15){$("privateMsg").textContent="O código tem no máximo 15 caracteres.";return;}
+ if(!password){$("privateMsg").textContent="Digite a senha da sala.";return;}
+ closePrivate();currentUser=$("menuNick").textContent||currentUser;socket.emit("room:join",{nickname:currentUser,code,password});
+};
 $("ceoBtn").onclick=()=>{const key=prompt("Chave CEO:");if(!key)return;pendingAction="ceo";openTracks();window.__ceoKey=key;};
 async function beginRoom(ceo=false,forceSolo=false){
  currentUser=$("menuNick").textContent||currentUser;
- if(ceo||pendingAction==="ceo")socket.emit("room:create",{nickname:currentUser,ceo:true,key:window.__ceoKey,track:selectedTrack});
- else socket.emit("room:create",{nickname:currentUser,ceo:false,track:selectedTrack,mode:forceSolo||pendingAction==="solo"?"solo":"room"});
+ if(ceo||pendingAction==="ceo") socket.emit("room:create",{nickname:currentUser,ceo:true,key:window.__ceoKey,track:selectedTrack});
+ else if(forceSolo||pendingAction==="solo") socket.emit("room:create",{nickname:currentUser,ceo:false,track:selectedTrack,mode:"solo"});
+ else { const pr=window.__privateRoom||{}; socket.emit("room:create",{nickname:currentUser,ceo:false,track:selectedTrack,mode:"room",roomName:pr.name,password:pr.password}); }
 }
 function renderLobby(s){
- $("roomCode").textContent=s.code;$("lobbyTrack").textContent=s.trackName||"NEON CITY";
- $("players").innerHTML=s.players.map((p,i)=>`<div class="p ${p.bot?"bot-player":""}" style="--c:${p.color}"><span><b>${i+1}</b> ${escapeHtml(p.nickname)} ${p.bot?"<small>BOT</small>":""}</span><strong>${p.alive?"READY":"OUT"}</strong></div>`).join("");
+ $("roomCode").textContent=s.code;$("roomName").textContent=s.roomName?`NOME: ${escapeHtml(s.roomName)}`:"";$("lobbyTrack").textContent=s.trackName||"NEON CITY";
+ $("players").innerHTML=(s.players||[]).map((p,i)=>`<div class="p" style="--c:${p.color}"><span><b>${i+1}</b> ${escapeHtml(p.nickname)}</span><strong>${p.alive?"PRONTO":"FORA"}</strong></div>`).join("");
 }
 socket.on("connect",()=>message("SERVIDOR ONLINE"));
 socket.on("connect_error",()=>message("Conexão instável — tentando novamente..."));
-socket.on("error:game",x=>{$("lobbyMsg").textContent=x;message(x);});
+socket.on("error:game",x=>{const text=typeof x==="string"?x:(x?.message||x?.error||"Erro na partida");if($("lobbyMsg"))$("lobbyMsg").textContent=text;if($("privateMsg")&&!$("privatePanel").classList.contains("hidden"))$("privateMsg").textContent=text;message(text);});
 socket.on("room",x=>{
  roomMode=x.mode||"room";
+ if(roomMode==="solo"){
+   $("lobbyMode").textContent="CORRIDA RÁPIDA";
+   $("lobbyMsg").textContent="Preparando sua corrida...";
+   if(x.canStart) setTimeout(()=>socket.emit("room:start"),80);
+   return;
+ }
  show("lobby");
- $("lobbyMode").textContent=roomMode==="solo"?"SOLO • 7 BOTS":"SALA MULTIPLAYER";
- renderLobby({code:x.code,trackName:TRACKS.find(t=>t.id===x.track)?.name||x.track,players:[]});
- if(x.ceo){$("start").classList.remove("hidden");$("ceoTools").classList.remove("hidden");}
- else if(pendingAction==="solo")$("start").classList.remove("hidden");
+ $("lobbyMode").textContent=x.ceo?"CEO • SALA PRIVADA":"SALA PRIVADA";
+ renderLobby({code:x.code,roomName:x.roomName,trackName:TRACKS.find(t=>t.id===x.track)?.name||x.track,players:[]});
+ $("start").classList.toggle("hidden",!x.canStart);
+ $("ceoTools").classList.toggle("hidden",!x.ceo);
  $("ceoTrack").innerHTML=TRACKS.map(t=>`<option value="${t.id}" ${t.id===x.track?"selected":""}>${t.name}</option>`).join("");
 });
 socket.on("state",s=>{lastState=s;if(!$("lobby").classList.contains("hidden"))renderLobby(s);});
 $("start").onclick=()=>socket.emit("room:start");
 $("ceoTrack").onchange=e=>socket.emit("room:track",e.target.value);
-$("back").onclick=()=>{location.reload()};
+$("back").onclick=()=>{socket.emit("room:leave");show("menu");};
 socket.on("race:loading",x=>showLoading(x.track));
-socket.on("start",x=>{showLoading(x.track);setTimeout(()=>startGame(x.track),250);});
+socket.on("start",x=>{showLoading(x.track);setTimeout(()=>startGame(x.track),350);});
 socket.on("hit",x=>showHit(x));
 socket.on("race:finish",x=>showFinish(x.results,x.track));
 
@@ -239,5 +299,5 @@ $("configBtn").onclick=()=>modal("CONFIGURAÇÕES",`<div class="settings-grid">
  <div class="setting"><b>ÁUDIO</b><p>Controles de áudio preparados para a próxima camada.</p></div></div>`);
 document.querySelector("#modalContent").onclick=e=>{const q=e.target.dataset.q;if(q){quality=q;localStorage.setItem("neon_quality",q);e.target.parentElement.querySelectorAll("button").forEach(b=>b.style.outline=b.dataset.q===q?"2px solid #00eaff":"none");$("overlayPanel").classList.add("hidden");message("Qualidade salva: "+q.toUpperCase())}};
 $("rank").onclick=async()=>{try{const a=await api("/api/rank");modal("RANKING GLOBAL",a.length?`<div>${a.map((x,i)=>`<div class="p"><span>${i+1}º ${escapeHtml(x.nickname)}</span><b>${x.ph} PH</b></div>`).join("")}</div>`:"<p>Ranking vazio.</p>")}catch(e){message("Ranking indisponível")}};
-$("shopBtn").onclick=async()=>{try{const items=await api("/api/shop");modal("NEON MARKET",`<div class="settings-grid">${items.map(i=>`<div class="setting"><b>${escapeHtml(i.name)}</b><p>${i.rarity}</p><strong>${i.price===0?"GRÁTIS":i.price+" BC"}</strong><br><button data-buy="${i.code}">${i.price===0?"PEGAR":"COMPRAR"}</button></div>`).join("")}</div>`)}catch(e){message("Loja indisponível")}};
+$("shopBtn").onclick=()=>modal("LOJA",`<div class="shop-unavailable"><b>INDISPONÍVEL NO MOMENTO</b><p>A loja está temporariamente desativada enquanto os sistemas de cosméticos são revisados.</p></div>`);
 $("modalContent").addEventListener("click",async e=>{const code=e.target.dataset.buy;if(!code)return;try{await api("/api/shop/buy",{method:"POST",body:JSON.stringify({code})});e.target.textContent="ADQUIRIDO";}catch(err){e.target.textContent=err.message.toUpperCase()}});
