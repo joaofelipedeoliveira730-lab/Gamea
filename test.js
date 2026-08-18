@@ -99,6 +99,9 @@ assert(!server.includes('m.x') && !server.includes('m.y'),'server must not trust
 
 assert(app.includes('addTrackRibbon'),'3D track ribbon pipeline missing');
 assert(app.includes('buildEnvironment'),'3D environment fallback missing');
+assert(app.includes('let renderer,scene,camera,clock,playerMeshes=new Map(),itemBoxes=[],worldGroup,environmentGroup'),'environmentGroup regression: undeclared runtime variable');
+assert(app.includes('function makeRoadTexture'),'procedural road texture missing');
+assert(app.includes('Promise.race([backdropPromise'),'scenery loading timeout missing');
 assert(app.includes('addCloud'),'environment cloud geometry missing');
 assert(app.includes('addRock'),'environment rock geometry missing');
 assert(app.includes('addBush'),'environment foliage geometry missing');
@@ -113,7 +116,7 @@ assert(app.includes('webglcontextlost'),'WebGL context recovery missing');
 assert(app.includes('characterId:selectedCharacter'),'selected character not sent to race');
 assert(server.includes('characterId:p.characterId||1'),'character identity not exposed to HUD safely');
 assert(server.includes('targetLane'),'bot racing-line logic missing');
-console.log('NEON PATH 9.2 QA: OK');
+console.log('NEON PATH 9.4 QA: OK');
 console.log(`RACE SIMULATION: ${completed} complete races across 3 modes x 8 maps`);
 console.log('SECURITY SIMULATION: private passwords, owner-only start, hidden AI, input clamping/rate-limit model: OK');
 console.log('MOBILE QA: landscape lock helper + touch steering/turbo/item controls present + WebGL recovery');

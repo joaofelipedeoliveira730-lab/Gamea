@@ -12,7 +12,7 @@ function effectiveQuality(){
 }
 let authToken=localStorage.getItem("neon_token")||"";
 let currentUser="Piloto", selectedCharacter=0, selectedTrack="neon-city", pendingAction="quick";
-let renderer,scene,camera,clock,playerMeshes=new Map(),itemBoxes=[],worldGroup,particles,trackDef,lastState,lastRaceStart=0,gameRunning=false,roomMode="room",trackBackdrop=null,trackTextureLoader=new THREE.TextureLoader(),backdropPromise=Promise.resolve();
+let renderer,scene,camera,clock,playerMeshes=new Map(),itemBoxes=[],worldGroup,environmentGroup,environmentSeed=0,particles,trackDef,lastState,lastRaceStart=0,gameRunning=false,roomMode="room",trackBackdrop=null,trackTextureLoader=new THREE.TextureLoader(),backdropPromise=Promise.resolve(),loadingTimer=null;
 let keys={left:false,right:false,drift:false,accelerate:false,brake:false}, touchTimer=null, cameraTarget=new THREE.Vector3(), cameraLook=new THREE.Vector3(), renderFrame=0;
 
 const CHARACTERS=[
@@ -189,10 +189,16 @@ socket.on("hit",x=>showHit(x));
 socket.on("race:finish",x=>showFinish(x.results,x.track));
 
 function showLoading(id){
- const t=TRACKS.find(x=>x.id===id)||TRACKS[0];$("loadingTitle").textContent=t.name;$("loadingSub").textContent="CARREGANDO PISTA...";$("loadFill").style.width="12%";show("loading");
- let n=12;const tip=["Montando cenário...","Otimizando sombras...","Carregando detalhes da pista...","Preparando pilotos...","Tudo pronto!"];let i=0;
- const timer=setInterval(()=>{n=Math.min(92,n+Math.random()*11);$("loadFill").style.width=n+"%";$("loadTip").textContent="DICA: "+tip[i++%tip.length];},180);
- setTimeout(()=>{clearInterval(timer);$("loadFill").style.width="100%";},1800);
+ if(loadingTimer){clearInterval(loadingTimer);loadingTimer=null;}
+ const t=TRACKS.find(x=>x.id===id)||TRACKS[0];
+ $("loadingTitle").textContent=t.name;
+ $("loadingSub").textContent="CARREGANDO PISTA...";
+ $("loadFill").style.width="8%";
+ show("loading");
+ let n=8;
+ const tip=["Montando chão e asfalto...","Aplicando iluminação...","Carregando cenário...","Preparando pilotos...","Otimizando sombras...","Tudo pronto!"];
+ let i=0;
+ loadingTimer=setInterval(()=>{n=Math.min(94,n+Math.random()*8);$("loadFill").style.width=n+"%";$("loadTip").textContent="DICA: "+tip[i++%tip.length];},180);
 }
 function showHit(x){const el=document.createElement("div");el.textContent=`⚡ ${x.from} acertou ${x.to}`;el.style.cssText="position:fixed;top:20%;left:50%;transform:translateX(-50%);z-index:20;font-weight:1000;color:#ffe600;text-shadow:0 0 20px #ff8c00";document.body.appendChild(el);setTimeout(()=>el.remove(),900);}
 
@@ -245,6 +251,14 @@ function addBackdrop(t){
  trackBackdrop=new THREE.Sprite(spriteMat);trackBackdrop.position.set(0,34,0);trackBackdrop.scale.set(210,118,1);scene.add(trackBackdrop);
  backdropPromise=new Promise(resolve=>trackTextureLoader.load(path,tex=>{tex.colorSpace=THREE.SRGBColorSpace;spriteMat.map=tex;spriteMat.needsUpdate=true;resolve(true)},undefined,()=>resolve(false)));
 }
+function makeRoadTexture(){
+ const c=document.createElement("canvas");c.width=c.height=256;const ctx=c.getContext("2d");
+ ctx.fillStyle="#252932";ctx.fillRect(0,0,256,256);const img=ctx.getImageData(0,0,256,256);
+ for(let i=0;i<img.data.length;i+=4){const n=31+Math.floor(Math.random()*18);img.data[i]=n;img.data[i+1]=n+2;img.data[i+2]=n+5;img.data[i+3]=255;}ctx.putImageData(img,0,0);
+ for(let i=0;i<260;i++){const x=Math.random()*256,y=Math.random()*256,r=.25+Math.random()*1.4;ctx.fillStyle=Math.random()>.72?"rgba(255,255,255,.055)":"rgba(0,0,0,.08)";ctx.beginPath();ctx.arc(x,y,r,0,Math.PI*2);ctx.fill();}
+ const tex=new THREE.CanvasTexture(c);tex.colorSpace=THREE.SRGBColorSpace;tex.wrapS=THREE.RepeatWrapping;tex.wrapT=THREE.RepeatWrapping;tex.repeat.set(22,2);tex.anisotropy=Math.min(renderer?.capabilities?.getMaxAnisotropy?.()||1,8);return tex;
+}
+
 function addTrackRibbon(group,rx,rz,width,color,y=0.08,textureUrl=null,segments=192){
  const positions=new Float32Array((segments+1)*2*3),uvs=new Float32Array((segments+1)*2*2),indices=[];
  const half=width/2;
@@ -370,7 +384,8 @@ function buildTrack(t){
  // Broad, banked ribbon: avoids the old flat/white slab perspective and gives the camera a readable racing surface.
  // Pista: asfalto limpo + faixas tracejadas + zebras. Não usamos fotos como textura do asfalto,
  // porque isso causava a antiga "lâmina branca" e deformações quando a câmera aproximava.
- const roadMat=mat(theme==='ice'?0x3b5363:theme==='desert'?0x38312d:0x252932,.96,0.05);
+ const roadMat=mat(theme==='ice'?0x3b5363:theme==='desert'?0x38312d:0x252932,.92,0.05);
+ roadMat.map=makeRoadTexture();roadMat.needsUpdate=true;
  const shoulder=addTrackRibbon(worldGroup,rx,rz,23.5,theme==='city'?0x13283b:theme==='desert'?0x76502e:theme==='ice'?0x6fb6c9:theme==='jungle'?0x155d37:theme==='volcano'?0x30171a:0x1a3f3a,.03,null,q==='low'?128:192);shoulder.material.roughness=1;
  const road=addTrackRibbon(worldGroup,rx,rz,17.5,0x252932,.10,null,q==='low'?128:192);road.material=roadMat;road.material.roughness=.92;road.material.metalness=.03;
  addLaneMarks(worldGroup,rx,rz,-2.8,q==='low'?44:72,0xf8fbff);
@@ -429,6 +444,7 @@ function buildParticles(){
 }
 async function startGame(id){
  try{
+  if(loadingTimer){clearInterval(loadingTimer);loadingTimer=null;}
   gameRunning=true;playerMeshes.clear();trackDef=TRACKS.find(t=>t.id===id)||TRACKS[0];
   showLoading(trackDef.id);
   const loadingStarted=performance.now();
@@ -442,7 +458,9 @@ async function startGame(id){
  buildTrack(trackDef);buildParticles();window.onresize=resize;
  let slow=false;
  const slowTimer=setTimeout(()=>{slow=true;$('loadingSub').textContent='AINDA CARREGANDO... OTIMIZANDO O CENÁRIO';document.querySelector('.loading-shell')?.classList.add('slow');},3000);
- await backdropPromise;
+ // Cenário remoto nunca pode bloquear a corrida inteira.
+ // A geometria procedural continua sendo o fallback visual completo.
+ await Promise.race([backdropPromise,new Promise(resolve=>setTimeout(resolve,1800))]);
  clearTimeout(slowTimer);
  const elapsed=performance.now()-loadingStarted;
  if(elapsed<450)await new Promise(r=>setTimeout(r,450-elapsed));
