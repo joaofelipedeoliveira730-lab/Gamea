@@ -1,11 +1,22 @@
 import * as THREE from "three";
 const $=id=>document.getElementById(id), socket=io();
 let quality="auto",room="",me="",scene,camera,renderer,world=[],trailMeshes=new Map(),lastState=null,last=performance.now(),keys={},floorMat=null;
+$("room").addEventListener("input",()=>{if($("room").value.length>15)$("room").value=$("room").value.slice(0,15);});
 $("quality").onclick=()=>{quality=quality==="auto"?"low":quality==="low"?"medium":quality==="medium"?"high":"auto";$("quality").textContent="QUALIDADE: "+quality.toUpperCase();if(renderer)applyQuality()};
 function nick(){return $("nick").value.trim()||"Piloto"}
 function msg(x){$("msg").textContent=x}
-$("create").onclick=()=>{me=nick();socket.emit("room:create",{nickname:me,ceo:false})};
-$("join").onclick=()=>{me=nick();socket.emit("room:join",{nickname:me,code:$("room").value.trim().toUpperCase()})};
+$("create").onclick=()=>{
+  me=nick();
+  socket.emit("room:create",{nickname:me,ceo:false});
+};
+$("join").onclick=()=>{
+  me=nick();
+  const code=$("room").value.trim();
+  const key=$("roomKey")?.value||"";
+  if(!code){msg("Digite o código da sala.");return;}
+  if(code.length>15){msg("O código pode ter no máximo 15 caracteres.");return;}
+  socket.emit("room:join",{nickname:me,code,key});
+};
 $("rank").onclick=async()=>{try{const r=await fetch("/api/rank");const a=await r.json();msg(a.length?a.map((x,i)=>`${i+1}. ${x.nickname} — ${x.ph} PH`).join(" • "):"Ranking vazio")}catch{msg("Ranking indisponível")}};
 $("start").onclick=()=>socket.emit("room:start");$("back").onclick=()=>location.reload();
 socket.on("connect",()=>msg("ONLINE"));

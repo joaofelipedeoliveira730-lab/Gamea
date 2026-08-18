@@ -61,3 +61,5 @@ html,body{min-height:100%;width:100%;margin:0;overflow:hidden}
   .auth-form input{height:54px!important;font-size:16px!important}
   .primary-auth{height:56px;font-size:16px}
 }
+
+.room-hint{font-size:.82rem;opacity:.8;margin:.55rem 0 0;line-height:1.4}.room-hint b{color:#00f6ff}.row input{min-width:0;flex:1}.row{display:flex;gap:.6rem;align-items:stretch}.row button{flex:1}

@@ -16,6 +16,8 @@ const server = http.createServer(app);
 const PORT = Number(process.env.PORT || 3000);
 const JWT_SECRET = process.env.JWT_SECRET || 'dev-only-neon-path-secret-change-me-32';
 const CEO_KEY = process.env.CEO_ROOM_KEY || 'Velho202026';
+const CEO_ROOM_CODE = 'VELHO202026';
+const MAX_ROOM_CODE_LENGTH = 15;
 const pool = process.env.DATABASE_URL
   ? new Pool({ connectionString: process.env.DATABASE_URL, ssl: { rejectUnauthorized: false }, max: 5 })
   : null;
@@ -278,22 +280,51 @@ const io=new Server(server,{cors:{origin:process.env.CLIENT_ORIGIN||'*'}});
 const rooms=new Map(), MAX=8, W=120, H=80, TICK=1000/30, MAX_SPEED=18;
 const colors=['#00f6ff','#ff2bd6','#8cff00','#ffe600','#8b5cff','#ff6b35','#36ff8c','#ff3b6b'];
 function roomCode(){return crypto.randomBytes(3).toString('hex').toUpperCase();}
-function makeRoom(code,ceo=false){return{code,ceo,players:new Map(),running:false,started:0,last:Date.now()};}
+function makeRoom(code,ceo=false){return{code,ceo,players:new Map(),running:false,started:0,last:Date.now(),persistent:!!ceo};}
+function normalizeRoomCode(v){return String(v||'').trim().toUpperCase();}
+function ensureCeoRoom(){let r=rooms.get(CEO_ROOM_CODE);if(!r){r=makeRoom(CEO_ROOM_CODE,true);rooms.set(CEO_ROOM_CODE,r);}return r;}
 function spawn(i){const a=[[15,15,0],[105,15,Math.PI],[15,65,0],[105,65,Math.PI],[60,12,Math.PI/2],[60,68,-Math.PI/2],[25,40,0],[95,40,Math.PI]][i%8];return{x:a[0],y:a[1],a:a[2],speed:9,energy:100,boost:0,alive:true,trail:[],kills:0,lastTurn:0,lastTurbo:0,lastSab:0};}
 function snap(r){return{code:r.code,running:r.running,started:r.started,players:[...r.players.values()].map(p=>({id:p.id,nickname:p.nickname,x:p.x,y:p.y,a:p.a,speed:p.speed,energy:p.energy,boost:p.boost,alive:p.alive,trail:p.trail.slice(-350),kills:p.kills,color:p.color}))};}
 function collision(p,r){if(p.x<2||p.y<2||p.x>W-2||p.y>H-2)return true;for(const q of r.players.values()){if(q.id!==p.id&&q.alive&&Math.hypot(p.x-q.x,p.y-q.y)<1.6)return true;}for(const q of r.players.values()){if(q.id===p.id)continue;for(const t of q.trail.slice(-350)){if(Math.abs(p.x-t[0])<.75&&Math.abs(p.y-t[1])<.75)return true;}}return false;}
 function start(r){if(r.running)return;r.running=true;r.started=Date.now();let i=0;for(const p of r.players.values())Object.assign(p,spawn(i++));io.to(r.code).emit('start',{code:r.code});}
 
 io.on('connection',s=>{
-  s.on('room:create',({nickname,ceo,key}={})=>{nickname=cleanNick(nickname)||'Piloto';if(ceo&&key!==CEO_KEY)return s.emit('error:game','Chave CEO inválida');let code=ceo?'VELHO202026':roomCode();if(rooms.has(code)&&!ceo)code=roomCode();const r=makeRoom(code,!!ceo);rooms.set(code,r);const p=spawn(0);Object.assign(p,{id:s.id,nickname,color:colors[0]});r.players.set(s.id,p);s.join(code);s.data.room=code;s.data.ceo=!!ceo;s.emit('room',{code,ceo:r.ceo});io.to(code).emit('state',snap(r));});
-  s.on('room:join',({code,nickname}={})=>{code=String(code||'').trim().toUpperCase();if(code.length>15)return s.emit('error:game','Código da sala deve ter no máximo 15 caracteres');const r=rooms.get(code);if(!r)return s.emit('error:game','Sala não encontrada');if(r.running||r.players.size>=MAX)return s.emit('error:game','Sala cheia ou corrida iniciada');const p=spawn(r.players.size);Object.assign(p,{id:s.id,nickname:cleanNick(nickname)||'Piloto',color:colors[r.players.size]});r.players.set(s.id,p);s.join(r.code);s.data.room=r.code;s.emit('room',{code:r.code,ceo:r.ceo});io.to(r.code).emit('state',snap(r));});
+  s.on('room:create',({nickname,ceo,key}={})=>{
+    nickname=cleanNick(nickname)||'Piloto';
+    const wantsCeo=!!ceo;
+    if(wantsCeo && key!==CEO_KEY)return s.emit('error:game','Chave CEO inválida');
+    const code=wantsCeo?CEO_ROOM_CODE:roomCode();
+    if(wantsCeo){
+      const r=ensureCeoRoom();
+      if(r.running||r.players.size>=MAX)return s.emit('error:game','Sala CEO ocupada ou corrida iniciada');
+      const p=spawn(r.players.size);Object.assign(p,{id:s.id,nickname,color:colors[r.players.size]});
+      r.players.set(s.id,p);s.join(r.code);s.data.room=r.code;s.data.ceo=true;s.emit('room',{code:r.code,ceo:true});io.to(r.code).emit('state',snap(r));return;
+    }
+    let finalCode=code;while(rooms.has(finalCode))finalCode=roomCode();
+    const r=makeRoom(finalCode,false);rooms.set(finalCode,r);
+    const p=spawn(0);Object.assign(p,{id:s.id,nickname,color:colors[0]});r.players.set(s.id,p);s.join(finalCode);s.data.room=finalCode;s.data.ceo=false;s.emit('room',{code:finalCode,ceo:false});io.to(finalCode).emit('state',snap(r));
+  });
+  s.on('room:join',({code,nickname,key}={})=>{
+    code=normalizeRoomCode(code);
+    if(code.length>MAX_ROOM_CODE_LENGTH)return s.emit('error:game','Código da sala deve ter no máximo 15 caracteres');
+    let r=rooms.get(code);
+    if(code===CEO_ROOM_CODE){
+      if(key!==CEO_KEY)return s.emit('error:game','Chave da sala CEO inválida');
+      r=ensureCeoRoom();
+    }
+    if(!r)return s.emit('error:game','Sala não encontrada');
+    if(r.running||r.players.size>=MAX)return s.emit('error:game','Sala cheia ou corrida iniciada');
+    const p=spawn(r.players.size);Object.assign(p,{id:s.id,nickname:cleanNick(nickname)||'Piloto',color:colors[r.players.size]});
+    r.players.set(s.id,p);s.join(r.code);s.data.room=r.code;s.data.ceo=!!r.ceo;s.emit('room',{code:r.code,ceo:r.ceo});io.to(r.code).emit('state',snap(r));
+  });
   s.on('room:start',()=>{const r=rooms.get(s.data.room);if(r&&r.ceo&&r.players.get(s.id))start(r);});
   s.on('input',m=>{const r=rooms.get(s.data.room),p=r?.players.get(s.id);if(!r||!p||!p.alive||!r.running)return;const now=Date.now();if(now-p.lastTurn<70)return;const type=m?.type;if(type==='left'||type==='right'){p.a+=(type==='left'?-1:1)*Math.PI/2;p.lastTurn=now;}if(type==='turbo'&&p.energy>=20&&now-p.lastTurbo>900){p.energy-=20;p.boost=1.65;p.lastTurbo=now;}if(type==='sabotage'&&p.energy>=30&&now-p.lastSab>8000){p.energy-=30;p.lastSab=now;let target=null,d=999;for(const q of r.players.values())if(q.alive&&q.id!==p.id){const dd=Math.hypot(p.x-q.x,p.y-q.y);if(dd<d){d=dd;target=q;}}if(target&&d<12){target.speed=Math.max(3,target.speed*.55);target.boost=.25;s.to(r.code).emit('hit',{from:p.nickname,to:target.nickname});}}});
-  s.on('disconnect',()=>{const r=rooms.get(s.data.room);if(r){r.players.delete(s.id);if(!r.players.size)rooms.delete(r.code);else io.to(r.code).emit('state',snap(r));}});
+  s.on('disconnect',()=>{const r=rooms.get(s.data.room);if(r){r.players.delete(s.id);if(!r.players.size&&!r.persistent)rooms.delete(r.code);else io.to(r.code).emit('state',snap(r));}});
 });
 
 setInterval(()=>{const now=Date.now();for(const r of rooms.values()){if(!r.running)continue;for(const p of r.players.values()){if(!p.alive)continue;const dt=TICK/1000,max=MAX_SPEED*(p.boost>0?1.65:1);p.speed+=((9+Math.min(6,(now-r.started)/30000))-p.speed)*.08;p.speed=Math.min(p.speed,max);p.x+=Math.cos(p.a)*p.speed*dt;p.y+=Math.sin(p.a)*p.speed*dt;p.energy=Math.min(100,p.energy+4*dt);p.boost=Math.max(0,p.boost-dt);p.trail.push([+p.x.toFixed(2),+p.y.toFixed(2)]);if(p.trail.length>450)p.trail.shift();if(collision(p,r))p.alive=false;}io.to(r.code).emit('state',snap(r));}},TICK);
 
-server.listen(PORT,()=>console.log(`NEON PATH listening on ${PORT}`));
+ensureCeoRoom();
+server.listen(PORT,()=>console.log(`NEON PATH listening on ${PORT} | CEO room ${CEO_ROOM_CODE}`));
 
 initDatabase().then(()=>console.log('NEON PATH database: ready')).catch(err=>console.error('database init:',err));
