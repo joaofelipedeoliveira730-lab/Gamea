@@ -4,8 +4,7 @@
   "private": true,
   "scripts": {
     "start": "node server.js",
-    "test": "node test-qa.js",
-    "check": "node --check server.js && node --check game-core.js && node --check test-qa.js"
+    "test": "node test.js"
   },
   "dependencies": {
     "bcryptjs": "^3.0.2",

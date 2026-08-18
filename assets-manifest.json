@@ -1,6 +1,6 @@
 {
-  "version": "4.0",
-  "download_strategy": "lazy_quality_profiles",
+  "version": "7.0",
+  "download_strategy": "lazy",
   "environment_textures": [
     "resources/environment_01.jpg",
     "resources/environment_02.jpg",
@@ -26,7 +26,17 @@
     "resources/environment_22.jpg",
     "resources/environment_23.jpg",
     "resources/environment_24.jpg",
-    "resources/environment_25.jpg"
+    "resources/environment_25.jpg",
+    "resources/environment_26.jpg",
+    "resources/environment_27.jpg",
+    "resources/environment_28.jpg",
+    "resources/environment_29.jpg",
+    "resources/environment_30.jpg",
+    "resources/environment_31.jpg",
+    "resources/environment_32.jpg",
+    "resources/environment_33.jpg",
+    "resources/environment_34.jpg",
+    "resources/environment_35.jpg"
   ],
   "sky_billboards": [
     "resources/sky_billboard_01.jpg",
@@ -36,19 +46,26 @@
     "resources/sky_billboard_05.jpg",
     "resources/sky_billboard_06.jpg"
   ],
-  "initial_download": "10-15MB package target; textures lazy-loaded by quality",
+  "initial_download": "~2-6MB UI + engine; selected race assets only",
   "quality_profiles": {
     "low": {
-      "textures": 2,
-      "pixelRatio": 0.8
+      "pixelRatio": 0.75,
+      "antialias": false,
+      "effects": "minimal"
     },
     "medium": {
-      "textures": 4,
-      "pixelRatio": 1.15
+      "pixelRatio": 1.0,
+      "antialias": true,
+      "effects": "balanced"
     },
     "high": {
-      "textures": 10,
-      "pixelRatio": 1.5
+      "pixelRatio": 1.35,
+      "antialias": true,
+      "effects": "full"
+    },
+    "auto": {
+      "pixelRatio": "device capped at 1.1",
+      "effects": "adaptive"
     }
   },
   "arena_detail": [
@@ -59,6 +76,16 @@
     "resources/arena_detail_104.jpg",
     "resources/arena_detail_105.jpg",
     "resources/arena_detail_106.jpg",
-    "resources/arena_detail_107.jpg"
+    "resources/arena_detail_107.jpg",
+    "resources/arena_detail_108.jpg",
+    "resources/arena_detail_109.jpg",
+    "resources/arena_detail_110.jpg",
+    "resources/arena_detail_111.jpg",
+    "resources/arena_detail_112.jpg",
+    "resources/arena_detail_113.jpg",
+    "resources/arena_detail_114.jpg",
+    "resources/arena_detail_115.jpg",
+    "resources/arena_detail_116.jpg",
+    "resources/arena_detail_117.jpg"
   ]
 }

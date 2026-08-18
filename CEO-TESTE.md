@@ -1,15 +1,16 @@
-# NEON PATH — Sala CEO de Teste
+# Conta CEO de teste
 
-A sala CEO é criada automaticamente pelo servidor e permanece disponível mesmo vazia.
+**Usuário:** `Teste CEO`
 
-- **Código:** `Velho202026`
-- **Chave:** `Velho202026`
-- **Limite de código:** 15 caracteres
-- **Jogadores:** pode iniciar com apenas 1 jogador
-- **Acesso:** exige a chave CEO
+A senha fornecida para o teste **não foi gravada no código nem no relatório**, para evitar que uma credencial apareça no GitHub.
 
-No menu, informe o apelido, o código e a chave e toque em **ENTRAR EM SALA EXISTENTE**.
+Configure a conta pelo fluxo normal de cadastro/login e atribua a role CEO/admin diretamente no PostgreSQL/Render.
 
-A comparação do código ignora maiúsculas/minúsculas, então `Velho202026`, `velho202026` e `VELHO202026` funcionam.
+A sala exclusiva de teste deve usar:
+- Chave: `Velho202026`
+- CEO pode iniciar sozinho.
+- Bots podem preencher a partida para teste.
+- Jogadores comuns não podem iniciar essa sala.
 
-A chave continua sendo comparada exatamente como configurada em `CEO_ROOM_KEY`.
+## Conta com tudo
+Para ter uma conta com todos os cosméticos, use um seed/admin server-side que marque `player_items.owned=true` para todos os `shop_items`. Não faça isso pelo navegador.

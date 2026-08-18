@@ -3,57 +3,112 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover">
-<meta name="theme-color" content="#030612">
-<title>NEON PATH</title>
+<meta name="theme-color" content="#050817">
+<title>NEON PATH RACING</title>
 <link rel="stylesheet" href="style.css">
 <script src="/socket.io/socket.io.js"></script>
 <script type="importmap">{"imports":{"three":"https://cdn.jsdelivr.net/npm/three@0.178.0/build/three.module.js"}}</script>
 </head>
 <body>
-<section id="authPanel" class="fullscreen-auth">
-  <div class="auth-shell">
-    <div class="auth-brand"><div class="logo">NEON <span>PATH</span></div><p>CORRA. EVOLUA. PRESTIGIE.</p></div>
-    <div class="auth-switch"><button id="showLogin" class="auth-tab active" type="button">ENTRAR</button><button id="showRegister" class="auth-tab" type="button">CADASTRAR</button></div>
-    <form id="loginForm" class="auth-form" autocomplete="on">
-      <label for="authNick">APELIDO</label><input id="authNick" maxlength="20" autocomplete="username" placeholder="Digite seu apelido" required>
-      <label for="authPassword">SENHA</label><input id="authPassword" type="password" minlength="8" maxlength="200" autocomplete="current-password" placeholder="Digite sua senha" required>
-      <button id="loginBtn" class="primary-auth" type="submit">ENTRAR</button>
-      <button id="toRegister" class="link-auth" type="button">Ainda não tenho conta · Cadastrar</button>
-    </form>
-    <form id="registerForm" class="auth-form hidden" autocomplete="on">
-      <label for="registerNick">APELIDO</label><input id="registerNick" maxlength="20" autocomplete="username" placeholder="Escolha seu apelido" required>
-      <label for="registerPassword">SENHA</label><input id="registerPassword" type="password" minlength="8" maxlength="200" autocomplete="new-password" placeholder="Mínimo de 8 caracteres" required>
-      <label for="registerEmail">E-MAIL <span>(opcional)</span></label><input id="registerEmail" type="email" maxlength="160" autocomplete="email" placeholder="Pode deixar vazio">
-      <button id="registerBtn" class="primary-auth" type="submit">CRIAR CONTA</button>
-      <button id="toLogin" class="link-auth" type="button">Já tenho conta · Entrar</button>
-    </form>
-    <div id="authMsg" aria-live="polite"></div>
+<div id="rotateNotice"><div class="rotate-card"><div class="rotate-icon">↻</div><h2>GIRE O CELULAR</h2><p>NEON PATH RACING foi feito para jogar em <b>paisagem</b>.</p></div></div>
+
+<section id="authPanel" class="auth-screen">
+  <div class="auth-bg"><div class="city-grid"></div><div class="neon-car car-a"></div><div class="neon-car car-b"></div></div>
+  <div class="auth-box">
+    <div class="auth-brand"><div class="logo">NEON <span>PATH</span></div><div class="game-title">RACING</div><p>CORRA. EVOLUA. PRESTIGIE.</p></div>
+    <div class="auth-switch"><button id="showLogin" class="active">ENTRAR</button><button id="showRegister">CADASTRAR</button></div>
+    <div id="loginForm" class="auth-form">
+      <label>APELIDO</label><input id="authNick" maxlength="20" autocomplete="username" placeholder="Digite seu apelido">
+      <label>SENHA</label><input id="authPassword" type="password" minlength="8" maxlength="200" autocomplete="current-password" placeholder="Digite sua senha">
+      <button id="loginBtn" class="primary">ENTRAR NA PISTA</button>
+      <button id="toRegister" class="text-btn">Ainda não tenho conta · Cadastrar</button>
+    </div>
+    <div id="registerForm" class="auth-form hidden">
+      <label>APELIDO</label><input id="registerNick" maxlength="20" autocomplete="username" placeholder="Escolha seu apelido">
+      <label>SENHA</label><input id="registerPassword" type="password" minlength="8" maxlength="200" autocomplete="new-password" placeholder="Mínimo de 8 caracteres">
+      <label>E-MAIL <span>OPCIONAL</span></label><input id="registerEmail" type="email" maxlength="160" autocomplete="email" placeholder="Pode deixar vazio">
+      <button id="registerBtn" class="primary">CRIAR CONTA</button>
+      <button id="toLogin" class="text-btn">Já tenho conta · Entrar</button>
+    </div>
+    <div id="authMsg"></div>
   </div>
+  <div class="version">NEON PATH RACING • V7.0 • OTIMIZADO</div>
 </section>
 
 <div id="app" hidden>
 <section id="menu" class="screen">
-  <div class="hero"><div class="logo">NEON<span>PATH</span></div><div class="tag">RACE THE LIGHT • SURVIVE THE CIRCUIT</div>
-    <div class="panel menu-panel">
-      <label for="nick">APELIDO</label><input id="nick" maxlength="20" placeholder="Apelido">
-      <button id="create">CRIAR NOVA SALA</button>
-      <button id="join">ENTRAR EM SALA EXISTENTE</button>
-      <button id="rank">RANKING GLOBAL</button>
-      <div class="room-box">
-        <label for="room">CÓDIGO DA SALA <small>máx. 15</small></label><input id="room" maxlength="15" inputmode="text" autocomplete="off" placeholder="Código da sala">
-        <label for="roomKey">CHAVE DA SALA</label><input id="roomKey" maxlength="200" type="password" autocomplete="off" placeholder="Chave (se houver)">
-      </div>
-      <div class="room-hint">CEO TESTE: <b>Velho202026</b> • chave protegida</div>
-      <button id="quality">QUALIDADE: AUTO</button>
-      <button id="logout" class="secondary">SAIR DA CONTA</button>
-      <div id="msg" aria-live="polite"></div>
+  <div class="menu-shell">
+    <header class="menu-head">
+      <div><div class="logo small">NEON<span>PATH</span></div><div class="tag">RACE THE LIGHT • SURVIVE THE CIRCUIT</div></div>
+      <div class="profile-chip"><b id="menuNick">Piloto</b><span>LV <i id="menuLevel">1</i></span><strong>◉ <i id="menuCoins">0</i></strong></div>
+    </header>
+    <div class="menu-grid">
+      <button id="playQuick" class="menu-card featured"><b>JOGAR</b><small>CORRIDA RÁPIDA</small><span>➤</span></button>
+      <button id="garageBtn" class="menu-card"><b>GARAGEM</b><small>PERSONALIZE</small><span>◆</span></button>
+      <button id="shopBtn" class="menu-card"><b>LOJA</b><small>COSMÉTICOS</small><span>◉</span></button>
     </div>
+    <div class="quick-links">
+      <button id="charactersBtn">◉ PERSONAGENS</button><button id="mapsBtn">▦ MAPAS</button><button id="rank">♛ RANKING</button><button id="configBtn">⚙ CONFIGURAÇÕES</button>
+    </div>
+    <div class="menu-actions"><button id="soloBtn">CORRIDA SOLO</button><button id="create">CRIAR SALA</button><button id="join">ENTRAR EM SALA</button><button id="ceoBtn">CEO</button></div>
+    <div class="room-row"><input id="room" maxlength="15" placeholder="Código da sala (máx. 15)" autocomplete="off"><span id="roomHint">CÓDIGO</span></div>
+    <div id="msg"></div>
   </div>
 </section>
-<section id="lobby" class="screen hidden"><div class="lobby"><h1>LOBBY <b id="roomCode">----</b></h1><div id="players"></div><button id="start" class="hidden">INICIAR CORRIDA</button><button id="back">VOLTAR</button></div></section>
-<section id="game" class="hidden"><canvas id="scene"></canvas><div class="hud"><div class="top"><div class="brand">NEON PATH</div><div id="lap">LAP 1/3</div><div id="timer">00:00</div></div><div id="score" class="score"></div><div class="bottom"><div class="energy"><span>ENERGY</span><div><i id="bar"></i></div><small>SHIFT / TURBO</small></div><div class="actions"><button id="turbo">TURBO</button><button id="sab">SABOTAGE</button></div><div class="mini"><canvas id="map" width="180" height="110"></canvas></div></div></div></section>
-<section id="shopPanel" class="panel" hidden><div class="store-title"><span>NEON</span> MARKET</div><div class="store-tabs"><button data-store-tab="shop">LOJA</button><button data-store-tab="inv">INVENTÁRIO</button></div><div id="shopGrid"></div><div id="inventoryGrid" hidden></div></section>
+
+<section id="select" class="screen hidden">
+  <div class="select-shell">
+    <div class="select-head"><button id="selectBack">←</button><div><h1 id="selectTitle">ESCOLHA SEU PILOTO</h1><small>PERSONAGENS ÚNICOS • EFEITOS LEVES</small></div><span>×</span></div>
+    <div id="characterSelect" class="character-grid"></div>
+    <div class="stat-box"><span>VELOCIDADE <i></i></span><span>ACELERAÇÃO <i></i></span><span>CONTROLE <i></i></span><span>TURBO <i></i></span></div>
+    <button id="selectContinue" class="ready-btn">CONTINUAR</button>
+  </div>
+</section>
+
+<section id="tracks" class="screen hidden">
+  <div class="track-shell">
+    <div class="select-head"><button id="tracksBack">←</button><div><h1>ESCOLHA O MAPA</h1><small>PISTAS CARREGADAS SOB DEMANDA</small></div><span>×</span></div>
+    <div id="trackGrid" class="track-grid"></div>
+    <button id="trackReady" class="ready-btn">PRONTO</button>
+  </div>
+</section>
+
+<section id="lobby" class="screen hidden">
+  <div class="lobby-shell">
+    <div class="lobby-top"><div><small>LOBBY</small><h1 id="roomCode">------</h1></div><div class="track-badge" id="lobbyTrack">NEON CITY</div></div>
+    <div id="players"></div>
+    <div class="lobby-controls"><button id="start" class="ready-btn hidden">INICIAR CORRIDA</button><button id="back">SAIR</button></div>
+    <div class="ceo-tools hidden" id="ceoTools"><b>CEO • CONTROLE DA PISTA</b><select id="ceoTrack"></select></div>
+    <div id="lobbyMsg"></div>
+  </div>
+</section>
+
+<section id="loading" class="screen hidden">
+  <div class="loading-shell"><div class="loading-scene" id="loadingScene"></div><div class="loading-title" id="loadingTitle">CARREGANDO</div><div class="loading-sub" id="loadingSub">PREPARANDO PISTA...</div><div class="load-bar"><i id="loadFill"></i></div><div class="load-tip" id="loadTip">DICA: use o turbo nas retas.</div></div>
+</section>
+
+<section id="game" class="hidden">
+ <canvas id="scene"></canvas>
+ <div class="race-vignette"></div>
+ <div class="race-hud">
+  <div class="race-top"><div class="brand">NEON<span>PATH</span></div><div id="lap">VOLTA 1/3</div><div id="timer">00:00</div></div>
+  <div id="score" class="score"></div>
+  <div class="countdown hidden" id="countdown">3</div>
+  <div class="speed-box"><b id="speed">000</b><small>KM/H</small></div>
+  <div class="mini"><canvas id="map" width="180" height="100"></canvas></div>
+  <div class="energy"><span>TURBO</span><div><i id="bar"></i></div><small>SHIFT / ESPAÇO</small></div>
+  <div class="actions"><button id="turbo">TURBO</button><button id="sab">ITEM</button></div>
+  <div class="touch-controls"><button id="touchLeft">◀</button><button id="touchRight">▶</button></div>
+ </div>
+</section>
+
+<section id="finish" class="screen hidden">
+ <div class="finish-shell"><div class="finish-kicker">CORRIDA ENCERRADA</div><h1>CHEGADA!</h1><div id="podium" class="podium"></div><div id="rewards" class="rewards"></div><button id="nextRace" class="ready-btn">PRÓXIMA CORRIDA</button></div>
+</section>
+
+<section id="overlayPanel" class="modal hidden">
+ <div class="modal-card"><button class="modal-close" id="modalClose">×</button><div id="modalContent"></div></div>
+</section>
 </div>
 <script type="module" src="app.js"></script>
-</body>
-</html>
+</body></html>
