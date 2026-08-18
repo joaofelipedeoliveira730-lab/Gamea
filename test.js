@@ -8,15 +8,23 @@ const server=fs.readFileSync('server.js','utf8');
 const manifest=JSON.parse(fs.readFileSync('assets-manifest.json','utf8'));
 
 // ================= STATIC QA =================
-for(const id of ['modePanel','modeSolo','modePrivate','modeJoin','roomNameInput','roomPasswordInput','roomCodeInput','termsGate','termsAccept','downloadResources','rotateFullscreen','loading','finish','ceoBtn','shopBtn']) assert(html.includes(`id="${id}"`),`${id} missing`);
+for(const id of ['modePanel','modeSolo','modePrivate','modeJoin','roomNameInput','roomPasswordInput','roomCodeInput','termsGate','termsAccept','downloadResources','rotateFullscreen','loading','finish','ceoBtn','shopBtn','touchLeft','touchRight','touchTurbo','touchItem','raceExit'])
+  assert(html.includes(`id="${id}"`),`${id} missing`);
 assert(html.includes('INDISPONÍVEL NO MOMENTO'),'shop unavailable state missing');
 assert(app.includes('requestFullscreenLandscape'),'fullscreen/orientation helper missing');
+assert(app.includes('screen.orientation.lock("landscape")'),'landscape lock missing');
 assert(app.includes('caches.open("neon-path-resources-v1")'),'resource cache missing');
 assert(app.includes('mode:"solo"'),'solo request missing');
 assert(app.includes('roomName:pr.name'),'room name request missing');
 assert(app.includes('password:pr.password'),'room password request missing');
 assert(app.includes('/resources/hd_scenes/'),'HD scenery pipeline missing');
-assert(app.includes('A corrida só mostra a tela de carregamento se o recurso realmente passar de 3s'),'3 second loading rule missing');
+assert(app.includes('AINDA CARREGANDO... OTIMIZANDO O CENÁRIO'),'3 second slow-loading feedback missing');
+assert(app.includes('effectiveQuality'),'adaptive quality missing');
+assert(app.includes('bindHold'),'touch hold controls missing');
+assert(app.includes('o.userData.exhaust'),'boost visual state missing');
+assert(css.includes('pointer:coarse'),'mobile control media query missing');
+assert(css.includes('touch-actions'),'mobile turbo/item UI missing');
+assert(css.includes('orientation:portrait'),'portrait safety overlay missing');
 assert(!app.includes('p.bot?"<small>BOT</small>"'),'bot label leaked to client');
 assert(server.includes('function roomPasswordHash'),'room password hash missing');
 assert(server.includes('Senha da sala incorreta'),'wrong password protection missing');
@@ -44,7 +52,6 @@ function simulateRace(mode,trackIndex,seed){
     for(const p of racers){
       if(!p.alive)continue;
       if(p.bot){p.steer=Math.sin(tick/29+p.id)*.55;if(p.energy>=20&&rand()<.012){p.energy-=20;p.boost=1.55;}}
-      // Human input stream: legal and malicious attempts are both fed into the simulation.
       if(!p.bot && tick%4===0){p.inputs++; const malicious=(tick%97===0);p.steer=malicious?(rand()*200-100):(rand()*2-1);}
       p.steer=Math.max(-1,Math.min(1,p.steer));
       const target=(p.bot?13.5*p.skill:13.5)+(p.boost>0?7:0);
@@ -59,21 +66,25 @@ function simulateRace(mode,trackIndex,seed){
   assert.strictEqual(new Set(racers.map(x=>x.finish)).size,MAX,`${mode}/${track} duplicate finish`);
   assert(racers.every(x=>x.lane>=-6&&x.lane<=6),`${mode}/${track} lane escape`);
   assert(racers.every(x=>Number.isFinite(x.progress)&&Number.isFinite(x.speed)),`${mode}/${track} NaN/Infinity`);
-  return {mode,track,finish:racers.map(x=>x.finish).sort((a,b)=>a-b)};
+  return {mode,track};
 }
 
 // 300 complete races: 100 Solo, 100 Private Room, 100 CEO/controlled room.
 const modes=['SOLO','SALA_PRIVADA','CEO'];
 let completed=0;
-for(let m=0;m<100;m++) for(let t=0;t<8;t++) { simulateRace(modes[Math.floor(m/34)%3],t,0x1000+m*31+t); completed++; }
-assert.strictEqual(completed,800,'expected track coverage failed');
+for(let i=0;i<300;i++){
+  const mode=modes[Math.floor(i/100)];
+  simulateRace(mode,i%8,0x1000+i*31);
+  completed++;
+}
+assert.strictEqual(completed,300,'expected 300 race simulations');
 
 // ================= PRIVATE ROOM / SECURITY =================
 const hash=x=>crypto.createHash('sha256').update(String(x)).digest('hex');
 for(let i=0;i<100;i++){
- const room={code:crypto.randomBytes(6).toString('hex').slice(0,12).toUpperCase(),mode:'room',roomName:`Sala ${i}`,passwordHash:hash('1234'),ownerId:'human',players:new Map()};
- assert(room.code.length<=15);room.players.set('human',{id:'human',bot:false});room.players.set('friend',{id:'friend',bot:false});
- assert(hash('errada')!==room.passwordHash);assert([...room.players.values()].every(p=>!p.bot));assert(room.ownerId==='human');
+  const room={code:crypto.randomBytes(6).toString('hex').slice(0,12).toUpperCase(),mode:'room',roomName:`Sala ${i}`,passwordHash:hash('1234'),ownerId:'human',players:new Map()};
+  assert(room.code.length<=15);room.players.set('human',{id:'human',bot:false});room.players.set('friend',{id:'friend',bot:false});
+  assert(hash('errada')!==room.passwordHash);assert([...room.players.values()].every(p=>!p.bot));assert(room.ownerId==='human');
 }
 
 // Malicious-client payload checks: only the server's small input vocabulary is valid.
@@ -83,10 +94,16 @@ for(const payload of malicious){
   const type=String(payload?.type||'');
   if(type) assert(allowedInputs.has(type) || ['teleport','all'].includes(type), 'unexpected input classification');
 }
-assert(!server.includes('m.target'), 'server must not trust a client-selected sabotage target');
-assert(!server.includes('m.x') && !server.includes('m.y'), 'server must not trust client coordinates');
+assert(!server.includes('m.target'),'server must not trust a client-selected sabotage target');
+assert(!server.includes('m.x') && !server.includes('m.y'),'server must not trust client coordinates');
 
-console.log('NEON PATH 8.0 QA: OK');
+assert(app.includes('addTrackRibbon'),'3D track ribbon pipeline missing');
+assert(app.includes('webglcontextlost'),'WebGL context recovery missing');
+assert(app.includes('characterId:selectedCharacter'),'selected character not sent to race');
+assert(server.includes('characterId:p.characterId||1'),'character identity not exposed to HUD safely');
+assert(server.includes('targetLane'),'bot racing-line logic missing');
+console.log('NEON PATH 9.0 QA: OK');
 console.log(`RACE SIMULATION: ${completed} complete races across 3 modes x 8 maps`);
 console.log('SECURITY SIMULATION: private passwords, owner-only start, hidden AI, input clamping/rate-limit model: OK');
-console.log('RESOURCE QA: original resources preserved + 8 new HD scene SVGs + 8 character portraits: OK');
+console.log('MOBILE QA: landscape lock helper + touch steering/turbo/item controls present + WebGL recovery');
+console.log('RESOURCE QA: original resources preserved + existing HD scene SVGs + portraits: OK');

@@ -303,7 +303,7 @@ const BOT_SKILLS=[0.94,0.98,1.02,0.96,1.05,0.92,1.00];
  */
 function spawn(i){
   const lane=(i%4-1.5)*2.1;
-  return {id:null,nickname:'Piloto',characterId:(i%8)+1,color:colors[i%colors.length],
+  return {id:null,nickname:'Piloto',color:colors[i%colors.length],
     progress:Math.max(0,i*0.008),lane,steer:0,speed:0,energy:100,boost:0,alive:true,
     trail:[],kills:0,lastInput:0,lastTurbo:0,lastSab:0,lap:1,finish:null};
 }
@@ -318,7 +318,7 @@ function snap(r){
   const t=trackById(r.track);
   return {code:r.code,mode:r.mode,solo:r.mode==='solo',roomName:r.roomName||'',running:r.running,started:r.started,track:r.track,trackName:t.name,
     players:[...r.players.values()].map(p=>{const q=posFor(p,t);return{
-      id:p.id,nickname:p.nickname,characterId:p.characterId||1,x:q.x,y:q.z,a:q.a,speed:p.speed,energy:p.energy,boost:p.boost,
+      id:p.id,nickname:p.nickname,x:q.x,y:q.z,a:q.a,speed:p.speed,energy:p.energy,boost:p.boost,
       alive:p.alive,trail:p.trail.slice(-80),kills:p.kills,color:p.color,lap:p.lap,finish:p.finish,progress:p.progress,lane:p.lane
     }})};
 }
@@ -326,7 +326,7 @@ function start(r){
   if(r.running)return;
   r.running=true;r.started=Date.now();r.finishOrder=[];
   let i=0;
-  for(const p of r.players.values()){const characterId=p.characterId||((i)%8)+1;Object.assign(p,spawn(i++),{id:p.id,nickname:p.nickname,color:p.color,characterId});}
+  for(const p of r.players.values())Object.assign(p,spawn(i++),{id:p.id,nickname:p.nickname,color:p.color});
   io.to(r.code).emit('race:loading',{track:r.track});
   setTimeout(()=>io.to(r.code).emit('start',{code:r.code,track:r.track}),900);
 }
@@ -345,7 +345,7 @@ function finishRace(r){
   io.to(r.code).emit('race:finish',{results,track:r.track});
 }
 io.on('connection',s=>{
-  s.on('room:create',({nickname,ceo,key,track,mode,roomName,password,characterId}={})=>{
+  s.on('room:create',({nickname,ceo,key,track,mode,roomName,password}={})=>{
     nickname=cleanNick(nickname)||'Piloto';
     mode=mode==='solo'?'solo':'room';
     if(ceo&&key!==CEO_KEY)return s.emit('error:game','Chave CEO inválida');
@@ -359,11 +359,11 @@ io.on('connection',s=>{
     }
     const code=ceo?'VELHO202026':mode==='solo'?soloCode():roomCode();
     const r=makeRoom(code,!!ceo,mode,name,passwordHash);r.ownerId=s.id;r.track=trackById(track).id;rooms.set(code,r);
-    const p=spawn(0);Object.assign(p,{id:s.id,nickname,bot:false,color:colors[0],characterId:Math.max(1,Math.min(8,Number(characterId)||1))});r.players.set(s.id,p);
+    const p=spawn(0);Object.assign(p,{id:s.id,nickname,bot:false,color:colors[0]});r.players.set(s.id,p);
     if(mode==='solo'){
       for(let i=1;i<MAX;i++){
         const b=spawn(i);
-        Object.assign(b,{id:`bot-${crypto.randomUUID()}`,nickname:BOT_NAMES[i-1],bot:true,botSkill:BOT_SKILLS[i-1],characterId:i+1,color:colors[i%colors.length]});
+        Object.assign(b,{id:`bot-${crypto.randomUUID()}`,nickname:BOT_NAMES[i-1],bot:true,botSkill:BOT_SKILLS[i-1],color:colors[i%colors.length]});
         r.players.set(b.id,b);
       }
     }
@@ -371,7 +371,7 @@ io.on('connection',s=>{
     s.emit('room',{code,ceo:r.ceo,mode:r.mode,solo:r.mode==='solo',roomName:r.roomName,track:r.track,canStart:true});
     io.to(code).emit('state',snap(r));
   });
-  s.on('room:join',({code,nickname,password,characterId}={})=>{
+  s.on('room:join',({code,nickname,password}={})=>{
     code=String(code||'').trim().toUpperCase();
     if(!code||code.length>15)return s.emit('error:game','Código da sala deve ter no máximo 15 caracteres');
     const r=rooms.get(code);
@@ -379,7 +379,7 @@ io.on('connection',s=>{
     if(r.mode==='solo')return s.emit('error:game','Essa corrida não aceita entrada de outros jogadores. Crie sua própria corrida.');
     if(r.running||r.players.size>=MAX)return s.emit('error:game','Sala cheia ou corrida já iniciada');
     if(!r.ceo && (!password||roomPasswordHash(password)!==r.passwordHash))return s.emit('error:game','Senha da sala incorreta');
-    const p=spawn(r.players.size);Object.assign(p,{id:s.id,nickname:cleanNick(nickname)||'Piloto',bot:false,color:colors[r.players.size],characterId:Math.max(1,Math.min(8,Number(characterId)||1))});
+    const p=spawn(r.players.size);Object.assign(p,{id:s.id,nickname:cleanNick(nickname)||'Piloto',bot:false,color:colors[r.players.size]});
     r.players.set(s.id,p);s.join(r.code);s.data.room=r.code;s.data.ceo=false;s.data.roomOwner=false;s.data.soloOwner=false;
     s.emit('room',{code:r.code,ceo:r.ceo,mode:r.mode,solo:false,roomName:r.roomName,track:r.track,canStart:r.ownerId===s.id});io.to(r.code).emit('state',snap(r));
   });
@@ -445,17 +445,15 @@ setInterval(()=>{
     for(const p of r.players.values()){
       if(!p.alive)continue;
       if(p.bot){
-        // Bots follow the racing line with bounded variation, then make tactical lane changes.
-        const phase=(now-r.started)/1100+p.id.length*0.73;
-        const targetLane=Math.sin(phase)*2.6+Math.sin(phase*0.47)*1.2;
-        p.steer=Math.max(-1,Math.min(1,(targetLane-p.lane)*0.9));
-        if(p.energy>=20 && Math.random()<0.024){p.energy-=20;p.boost=1.55;}
+        // Bots are server-authoritative: no client can fake their position.
+        const wave=Math.sin((now-r.started)/900+p.id.length)*0.55;
+        p.steer=wave;
+        if(p.energy>=20 && Math.random()<0.018){p.energy-=20;p.boost=1.55;}
       }
-      const rubber=(p.bot?1+Math.max(-.045,Math.min(.045,(0.5-p.progress))*0.35):1);
-      const target=(p.bot?13.7*p.botSkill:13.5)*rubber+(p.boost>0?7.5:0);
-      p.speed+=(target-p.speed)*.12;
-      p.lane+=p.steer*dt*8;
-      p.lane*=.986;
+      const target=(p.bot?13.5*p.botSkill:13.5)+(p.boost>0?7:0);
+      p.speed+=(target-p.speed)*.11;
+      p.lane+=p.steer*dt*7;
+      p.lane*=.985;
       p.lane=Math.max(-6,Math.min(6,p.lane));
       p.progress+=p.speed*dt/(2*Math.PI*Math.max(t.rx,t.rz)*1.05);
       if(p.progress>=1){p.progress-=1;p.lap++;if(p.lap>3)finishPlayer(p,r);}
