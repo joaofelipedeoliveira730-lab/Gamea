@@ -1,346 +1,73 @@
 require("dotenv").config();
-const path=require("path");
-const http=require("http");
-const crypto=require("crypto");
-const express=require("express");
-const cors=require("cors");
-const {Pool}=require("pg");
-const {WebSocketServer}=require("ws");
+const express=require("express"),http=require("http"),path=require("path"),crypto=require("crypto");
+const bcrypt=require("bcryptjs"),jwt=require("jsonwebtoken"),helmet=require("helmet"),cors=require("cors");
+const {Pool}=require("pg"); const {Server}=require("socket.io");
 
-const PORT=Number(process.env.PORT||3000);
-const app=express();
-app.use(cors());
-app.use(express.json());
+const app=express(), server=http.createServer(app);
+const PORT=Number(process.env.PORT||3000), JWT_SECRET=process.env.JWT_SECRET||"dev-only-change-me-32-characters-long";
+const CEO_KEY=process.env.CEO_ROOM_KEY||"Velho202026";
+const pool=process.env.DATABASE_URL?new Pool({connectionString:process.env.DATABASE_URL,ssl:{rejectUnauthorized:false}}):null;
+app.use(helmet({contentSecurityPolicy:false})); app.use(cors({origin:process.env.CLIENT_ORIGIN||"*"})); app.use(express.json({limit:"32kb"}));
 app.use(express.static(__dirname));
-const server=http.createServer(app);
-
-const pool=new Pool({
-  connectionString:process.env.DATABASE_URL,
-  ssl:process.env.NODE_ENV==="production"?{rejectUnauthorized:false}:false
+app.get("/health",async(_,res)=>{let db="disabled";try{if(pool){await pool.query("SELECT 1");db="ok"}}catch{db="error"}res.json({ok:true,game:"NEON PATH",version:"3.0.0",database:db})});
+app.get("/api/rank",async(_,res)=>{if(!pool)return res.json([]);try{const q=await pool.query("SELECT nickname,ph,wins,kills,races FROM users ORDER BY ph DESC LIMIT 50");res.json(q.rows)}catch{res.status(500).json({error:"rank"})}});
+function cleanNick(v){return typeof v==="string"&&/^[A-Za-z0-9_À-ÿ ]{2,20}$/.test(v.trim())?v.trim():null}
+app.post("/api/auth/guest",async(req,res)=>{
+ const nickname=cleanNick(req.body.nickname); if(!nickname)return res.status(400).json({error:"apelido inválido"});
+ if(!pool)return res.json({token:jwt.sign({nickname,guest:true},JWT_SECRET,{expiresIn:"7d"}),nickname});
+ try{
+   let q=await pool.query("SELECT id,nickname FROM users WHERE lower(nickname)=lower($1)",[nickname]);
+   let id;
+   if(q.rowCount) id=q.rows[0].id;
+   else {const h=await bcrypt.hash(crypto.randomBytes(18).toString("hex"),10);q=await pool.query("INSERT INTO users(nickname,password_hash) VALUES($1,$2) RETURNING id",[nickname,h]);id=q.rows[0].id}
+   res.json({token:jwt.sign({sub:id,nickname},JWT_SECRET,{expiresIn:"7d"}),nickname});
+ }catch{res.status(500).json({error:"banco"})}
 });
 
-async function initDatabase(){
-  await pool.query(`
-    CREATE TABLE IF NOT EXISTS players (
-      id BIGSERIAL PRIMARY KEY,
-      nickname VARCHAR(18) NOT NULL UNIQUE,
-      skill_points INTEGER NOT NULL DEFAULT 1000,
-      wins INTEGER NOT NULL DEFAULT 0,
-      kills INTEGER NOT NULL DEFAULT 0,
-      games INTEGER NOT NULL DEFAULT 0,
-      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-      updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-    );
-    CREATE INDEX IF NOT EXISTS players_skill_points_idx
-      ON players(skill_points DESC);
-  `);
+const io=new Server(server,{cors:{origin:process.env.CLIENT_ORIGIN||"*"}});
+const rooms=new Map(), MAX=8, W=120, H=80, TICK=1000/30, MAX_SPEED=18;
+const colors=["#00f6ff","#ff2bd6","#8cff00","#ffe600","#8b5cff","#ff6b35","#36ff8c","#ff3b6b"];
+function roomCode(){return crypto.randomBytes(3).toString("hex").toUpperCase()}
+function makeRoom(code,ceo=false){return {code,ceo,players:new Map(),running:false,started:0,last:Date.now()}}
+function spawn(i){const a=[ [15,15,0],[105,15,Math.PI],[15,65,0],[105,65,Math.PI],[60,12,Math.PI/2],[60,68,-Math.PI/2],[25,40,0],[95,40,Math.PI] ][i%8];return {x:a[0],y:a[1],a:a[2],speed:9,energy:100,boost:0,alive:true,trail:[],kills:0,lastTurn:0,lastTurbo:0,lastSab:0}}
+function snap(r){return {code:r.code,running:r.running,players:[...r.players.values()].map(p=>({id:p.id,nickname:p.nickname,x:p.x,y:p.y,a:p.a,speed:p.speed,energy:p.energy,boost:p.boost,alive:p.alive,trail:p.trail.slice(-350),kills:p.kills,color:p.color}))}}
+function collision(p,r){
+ if(p.x<2||p.y<2||p.x>W-2||p.y>H-2)return true;
+ for(const q of r.players.values()){if(!q.alive)continue;if(q.id!==p.id&&Math.hypot(p.x-q.x,p.y-q.y)<1.6)return true}
+ const old=p.trail.slice(-2), self=p.trail.slice(0,-3);
+ for(const t of [...self,...[].concat(...[...r.players.values()].filter(q=>q.id!==p.id).map(q=>q.trail.slice(-350)))])
+   if(Math.abs(p.x-t[0])<.75&&Math.abs(p.y-t[1])<.75)return true;
+ return false;
 }
-
-
-app.get("/health",async(_,res)=>{
-  try{
-    await pool.query("SELECT 1 FROM players LIMIT 1");
-    res.json({ok:true,service:"NEON PATH",database:"ok"});
-  }catch(e){
-    res.status(503).json({ok:false,service:"NEON PATH",database:"error"});
-  }
+function start(r){if(r.running)return; r.running=true;r.started=Date.now();let i=0;for(const p of r.players.values()){Object.assign(p,spawn(i++));}io.to(r.code).emit("start",{code:r.code});}
+io.on("connection",s=>{
+ s.on("room:create",({nickname,ceo,key}={})=>{
+   nickname=cleanNick(nickname)||"Piloto"; if(ceo&&key!==CEO_KEY)return s.emit("error:game","Chave CEO inválida");
+   let code=ceo?"CEO50":roomCode(); if(rooms.has(code)&&!ceo)code=roomCode();
+   const r=makeRoom(code,!!ceo);rooms.set(code,r); const p=spawn(0);Object.assign(p,{id:s.id,nickname,color:colors[0]});r.players.set(s.id,p);s.join(code);s.data.room=code;s.emit("room",{code,ceo:r.ceo});
+ });
+ s.on("room:join",({code,nickname}={})=>{
+   const r=rooms.get(String(code||"").toUpperCase()); if(!r)return s.emit("error:game","Sala não encontrada");
+   if(r.running||r.players.size>=MAX)return s.emit("error:game","Sala cheia ou corrida iniciada");
+   const p=spawn(r.players.size);Object.assign(p,{id:s.id,nickname:cleanNick(nickname)||"Piloto",color:colors[r.players.size]});r.players.set(s.id,p);s.join(r.code);s.data.room=r.code;s.emit("room",{code:r.code,ceo:r.ceo});io.to(r.code).emit("state",snap(r));
+ });
+ s.on("room:start",()=>{const r=rooms.get(s.data.room);if(r&&r.ceo&&r.players.get(s.id))start(r)});
+ s.on("input",m=>{
+   const r=rooms.get(s.data.room),p=r?.players.get(s.id); if(!r||!p||!p.alive)return;
+   const now=Date.now(); if(now-p.lastTurn<70)return;
+   const type=m?.type;
+   if(type==="left"||type==="right"){p.a+=(type==="left"?-1:1)*Math.PI/2;p.lastTurn=now}
+   if(type==="turbo"&&p.energy>=20&&now-p.lastTurbo>900){p.energy-=20;p.boost=1.65;p.lastTurbo=now}
+   if(type==="sabotage"&&p.energy>=30&&now-p.lastSab>8000){p.energy-=30;p.lastSab=now;let target=null,d=999;for(const q of r.players.values())if(q.alive&&q.id!==p.id){const dd=Math.hypot(p.x-q.x,p.y-q.y);if(dd<d){d=dd;target=q}}if(target&&d<12){target.speed=Math.max(3,target.speed*.55);target.boost=.25;s.to(r.code).emit("hit",{from:p.nickname,to:target.nickname})}}
+ });
+ s.on("disconnect",()=>{const r=rooms.get(s.data.room);if(r){r.players.delete(s.id);if(!r.players.size)rooms.delete(r.code)}})
 });
-
-app.get("/api/leaderboard",async(_,res)=>{
-  try{const {rows}=await pool.query("SELECT nickname,skill_points,wins,kills,games FROM players ORDER BY skill_points DESC,wins DESC LIMIT 50");res.json(rows)}
-  catch(e){res.status(500).json({error:"database"})}
-});
-
-const wss=new WebSocketServer({server});
-const rooms=new Map();
-const clients=new Map();
-const MAX_PLAYERS=10;
-const CEO_ROOM_KEY=String(process.env.CEO_ROOM_KEY||"");
-const TICK=50;
-const MAX_CHAT_PER_10S=8;
-const MAX_INPUT_PER_SECOND=24;
-const MAX_ROOM_AGE_MS=30*60*1000;
-const MAX_MESSAGE=120;
-const ARENA=1000;
-const COLORS=10;
-
-function send(ws,msg){if(ws.readyState===1)ws.send(JSON.stringify(msg))}
-function broadcast(room,msg){for(const p of room.players)send(p.ws,msg)}
-function cleanName(v){return String(v||"").trim().replace(/[^\p{L}\p{N}_ -]/gu,"").slice(0,18)}
-function clamp(v,a,b){return Math.max(a,Math.min(b,v))}
-function safeRoomCode(){return Math.random().toString(36).slice(2,6).toUpperCase()}
-function publicPlayer(p){return {id:p.id,nickname:p.nickname,colorIndex:p.colorIndex,alive:p.alive,kills:p.kills,distance:Math.floor(p.distance),energy:Math.floor(p.energy),breath:Math.floor(p.breath),x:p.x/ARENA,y:p.y/ARENA,angle:p.angle,trail:p.trail.slice(-900)}} 
-function publicRoom(r,p){
-  return {
-    id:r.id,
-    players:r.players.map(x=>({id:x.id,nickname:x.nickname,ready:x.ready})),
-    canStart: r.hostId===p.id && (r.ceoOnly ? p.isCEO : r.players.length>=2),
-    ceoOnly:r.ceoOnly,
-    isCEO:!!p.isCEO
-  };
-}
-
-async function upsertPlayer(nickname){
-  const q=`INSERT INTO players(nickname) VALUES($1)
-    ON CONFLICT(nickname) DO UPDATE SET updated_at=NOW()
-    RETURNING id,nickname,skill_points,wins,kills,games`;
-  const {rows}=await pool.query(q,[nickname]); return rows[0];
-}
-
-class Room{
-  constructor(id,opts={}){this.id=id;this.hostId=null;this.ceoOnly=!!opts.ceoOnly;this.ceoId=opts.ceoId||null;this.players=[];this.phase="lobby";this.startedAt=0;this.time=0;this.zone=1;this.last=Date.now();this.timer=null;this.resultAt=0}
-  add(p){if(this.players.length>=MAX_PLAYERS)return false;p.room=this;this.players.push(p);if(!this.hostId)this.hostId=p.id;return true}
-  remove(p){
-    this.players=this.players.filter(x=>x!==p);
-    if(this.hostId===p.id)this.hostId=this.players[0]?.id||null;
-    if(!this.players.length)this.stop();
-  }
-  start(requester){
-    if(this.phase==="playing")return;
-    if(this.ceoOnly){
-      if(!requester?.isCEO || requester.id!==this.ceoId)return false;
-      if(this.players.length<1)return false;
-    }else if(this.players.length<2)return false;
-    this.phase="playing";this.time=0;this.zone=1;this.startedAt=Date.now();
-    const slots=spawnSlots(this.players.length);
-    this.players.forEach((p,i)=>p.reset(slots[i],i));
-    this.last=Date.now();
-    this.timer=setInterval(()=>this.tick(),TICK);
-    this.broadcastState();
-  }
-  tick(){
-    const now=Date.now(),dt=Math.min((now-this.last)/1000,.1);this.last=now;
-    if(this.phase!=="playing")return;
-    this.time+=(dt);
-    this.zone=clamp(1-Math.max(0,this.time-10)/170,.36,1);
-    const active=this.players.filter(p=>p.alive);
-    for(const p of active)p.update(dt,this);
-    this.collisions();
-    const aliveCount=this.players.filter(p=>p.alive).length;
-    if(this.ceoOnly ? aliveCount===0 : aliveCount<=1)this.finish();
-    else this.broadcastState();
-  }
-  collisions(){
-    const alive=this.players.filter(p=>p.alive);
-    for(const p of alive){
-      const margin=ARENA*(1-this.zone)/2;
-      if(p.x<margin||p.x>ARENA-margin||p.y<margin||p.y>ARENA-margin){this.eliminate(p,null,"zone");continue}
-      const key=`${Math.round(p.x/8)},${Math.round(p.y/8)}`;
-      if(p.occupied.has(key)){this.eliminate(p,null,"self");continue}
-      p.occupied.add(key);
-      for(const o of this.players){
-        if(o===p)continue;
-        if(o.trailKeys.has(key)){this.eliminate(p,o,"trail");break}
-      }
-    }
-  }
-  eliminate(p,killer,reason){
-    if(!p.alive)return;
-    p.alive=false;
-    if(killer&&killer.alive)killer.kills++;
-    broadcast(this,{type:"impact",x:p.x/ARENA,y:p.y/ARENA,colorIndex:p.colorIndex,killerId:killer?.id||null,reason});
-  }
-  finish(){
-    if(this.phase!=="playing")return;
-    this.phase="result";clearInterval(this.timer);this.timer=null;
-    const alive=this.players.filter(p=>p.alive);
-    const winner=alive[0]||this.players.slice().sort((a,b)=>b.kills-a.kills||b.distance-a.distance)[0];
-    this.players.forEach(p=>p.games++);
-    if(winner){winner.wins++;winner.skillDelta=winner.id===this.hostId?28:25}
-    for(const p of this.players) p.skillDelta=(p.skillDelta||0)-(!p.alive?Math.min(18,4+p.kills*2):0);
-    this.persist(winner);
-    this.broadcastState();
-    setTimeout(()=>{if(this.phase==="result")this.cleanup()},8000);
-  }
-  async persist(winner){
-    for(const p of this.players){
-      try{
-        await pool.query(`UPDATE players SET skill_points=GREATEST(0,skill_points+$1),wins=wins+$2,kills=kills+$3,games=games+1,updated_at=NOW() WHERE id=$4`,
-          [p.skillDelta||0,p.id===winner?.id?1:0,p.kills,p.dbId]);
-      }catch{}
-    }
-  }
-  cleanup(){
-    if(this.players.length===0){rooms.delete(this.id);return}
-    this.phase="lobby";this.time=0;this.zone=1;
-    this.players.forEach(p=>{p.alive=false;p.ready=false;p.trail=[];p.trailKeys=new Set();p.occupied=new Set()});
-    broadcast(this,{type:"room",room:publicRoom(this,this.players[0])});
-  }
-  stop(){clearInterval(this.timer);this.timer=null}
-  broadcastState(){
-    const winnerId=this.phase==="result"?(this.players.find(p=>p.alive)?.id||null):null;
-    broadcast(this,{type:"state",state:{
-      phase:this.phase,time:this.time,zone:this.zone,winnerId,
-      players:this.players.map(publicPlayer)
-    }});
-  }
-}
-
-class Player{
-  constructor(ws,db){
-    this.ws=ws;this.dbId=db.id;this.id=crypto.randomUUID();this.nickname=db.nickname;this.ready=true;this.isCEO=false;this.room=null;
-    this.colorIndex=Math.floor(Math.random()*COLORS);this.alive=false;this.trail=[];this.trailKeys=new Set();this.occupied=new Set();
-    this.x=0;this.y=0;this.angle=0;this.speed=165;this.energy=100;this.breath=100;this.kills=0;this.distance=0;this.lastLeft=0;this.lastRight=0;this.coolTurbo=0;this.coolBreath=0;
-  }
-  reset(slot,index){
-    this.colorIndex=index%COLORS;this.alive=true;this.kills=0;this.distance=0;this.energy=100;this.breath=100;
-    this.x=slot.x;this.y=slot.y;this.angle=slot.angle;this.trail=[];this.trailKeys=new Set();this.occupied=new Set();
-  }
-  update(dt,room){
-    if(!this.alive)return;
-    this.coolTurbo=Math.max(0,this.coolTurbo-dt);this.coolBreath=Math.max(0,this.coolBreath-dt);
-    const now=Date.now();
-    if(this.ws._input?.left && now-this.lastLeft>170){this.angle-=Math.PI/2;this.lastLeft=now}
-    if(this.ws._input?.right && now-this.lastRight>170){this.angle+=Math.PI/2;this.lastRight=now}
-    const turbo=this.ws._input?.turbo&&this.energy>0;
-    if(turbo)this.energy=Math.max(0,this.energy-42*dt);else this.energy=Math.min(100,this.energy+9*dt);
-    this.breath=Math.min(100,this.breath+15*dt);
-    if(this.ws._input?.breath&&this.breath>=35&&this.coolBreath<=0){this.breath-=35;this.coolBreath=2.5;this.soplo(room)}
-    this.ws._input=null;
-    const speed=(room.time<30?165:room.time<60?185:room.time<100?210:235)*(turbo?1.8:1);
-    this.x+=Math.cos(this.angle)*speed*dt;this.y+=Math.sin(this.angle)*speed*dt;
-    this.distance+=speed*dt;
-    const last=this.trail[this.trail.length-1];
-    if(!last||Math.hypot(this.x-last[0],this.y-last[1])>5)this.trail.push([this.x,this.y]);
-    const k=`${Math.round(this.x/8)},${Math.round(this.y/8)}`;this.trailKeys.add(k);
-  }
-  soplo(room){
-    const radius=190;
-    for(const o of room.players){
-      if(o===this||!o.alive)continue;
-      const dx=o.x-this.x,dy=o.y-this.y,d=Math.hypot(dx,dy);
-      if(d<radius){
-        const force=(1-d/radius)*95;
-        const nx=d?dx/d:Math.cos(this.angle),ny=d?dy/d:Math.sin(this.angle);
-        o.x+=nx*force;o.y+=ny*force;
-      }
-    }
-  }
-}
-
-function spawnSlots(n){
-  const cx=ARENA/2,cy=ARENA/2,r=Math.min(ARENA*.36,ARENA/(n+2));
-  return Array.from({length:n},(_,i)=>{const a=i/n*Math.PI*2;return {x:cx+Math.cos(a)*r,y:cy+Math.sin(a)*r,angle:a+Math.PI}});
-}
-
-wss.on("connection",ws=>{
-  ws._input=null;
-  ws._inputCount=0;
-  ws._chatTimes=[];
-  ws._lastSeq=-1;
-  ws._connectedAt=Date.now();
-  ws._lastPacket=Date.now();
-  const rateTimer=setInterval(()=>{ws._inputCount=0},1000);
-  ws.on("error",()=>{});
-  send(ws,{type:"hello",server:"NEON PATH"});
-  ws.on("message",async raw=>{
-    if(Date.now()-ws._connectedAt>2*60*60*1000)return ws.close(1008,"session expired");
-    if(raw.length>8192)return send(ws,{type:"error",message:"Pacote muito grande."});
-    let m;try{m=JSON.parse(raw.toString())}catch{return}
-    if(!m || typeof m.type!=="string")return;
-    ws._lastPacket=Date.now();
-    if(m.type==="input"){
-      ws._inputCount++;
-      if(ws._inputCount>MAX_INPUT_PER_SECOND)return;
-      if(Number.isInteger(m.seq)){if(m.seq<=ws._lastSeq)return;ws._lastSeq=m.seq}
-    }
-    try{
-      if(m.type==="join"){
-        const nickname=cleanName(m.nickname);
-        if(nickname.length<2)return send(ws,{type:"error",message:"Apelido inválido."});
-        const db=await upsertPlayer(nickname);
-        const p=new Player(ws,db);clients.set(p.id,p);
-
-        if(m.mode==="create_ceo"){
-          if(!CEO_ROOM_KEY || String(m.key||"")!==CEO_ROOM_KEY){
-            clients.delete(p.id);
-            return send(ws,{type:"error",message:"Chave CEO inválida."});
-          }
-          p.isCEO=true;
-          const r=new Room(safeRoomCode(),{ceoOnly:true,ceoId:p.id});
-          rooms.set(r.id,r);
-          r.add(p);
-          send(ws,{type:"hello",player:{id:p.id,nickname:p.nickname,isCEO:true}});
-          return broadcast(r,{type:"room",room:publicRoom(r,p)});
-        }
-
-        if(m.mode==="create"){
-          const r=new Room(safeRoomCode());
-          rooms.set(r.id,r); r.add(p);
-          send(ws,{type:"hello",player:{id:p.id,nickname:p.nickname,isCEO:false}});
-          return broadcast(r,{type:"room",room:publicRoom(r,p)});
-        }
-
-        if(m.mode==="join_room"){
-          const code=String(m.roomId||"").trim().toUpperCase();
-          const r=rooms.get(code);
-          if(!r || r.phase!=="lobby" || r.players.length>=MAX_PLAYERS){
-            clients.delete(p.id); return send(ws,{type:"error",message:"Sala não encontrada ou lotada."});
-          }
-          if(r.ceoOnly && String(m.key||"")!==CEO_ROOM_KEY){
-            clients.delete(p.id); return send(ws,{type:"error",message:"Esta é uma sala exclusiva do CEO."});
-          }
-          if(!r.add(p)){clients.delete(p.id);return send(ws,{type:"error",message:"Sala lotada."});}
-          if(r.ceoOnly)p.isCEO=(p.id===r.ceoId);
-          send(ws,{type:"hello",player:{id:p.id,nickname:p.nickname,isCEO:!!p.isCEO}});
-          return broadcast(r,{type:"room",room:publicRoom(r,p)});
-        }
-
-        // Quick play never selects CEO-only rooms.
-        let r=[...rooms.values()].find(x=>!x.ceoOnly&&x.phase==="lobby"&&x.players.length<MAX_PLAYERS);
-        if(!r){r=new Room(safeRoomCode());rooms.set(r.id,r);}
-        r.add(p);
-        send(ws,{type:"hello",player:{id:p.id,nickname:p.nickname,isCEO:false}});
-        broadcast(r,{type:"room",room:publicRoom(r,p)});
-      }
-      else if(m.type==="start"){
-        const p=clients.get(m.id)||[...clients.values()].find(x=>x.ws===ws);if(!p?.room)return;
-        if(p.id!==p.room.hostId)return send(ws,{type:"error",message:"Só o líder da sala pode iniciar."});
-        if(!p.room.start(p))return send(ws,{type:"error",message:p.room.ceoOnly?"Somente o CEO pode iniciar esta sala.":"São necessários 2 jogadores."});
-      }
-      else if(m.type==="input"){
-        const p=[...clients.values()].find(x=>x.ws===ws);if(p)p.ws._input={left:!!m.left,right:!!m.right,turbo:!!m.turbo,breath:!!m.breath};
-      }
-      else if(m.type==="leave"){
-        const p=[...clients.values()].find(x=>x.ws===ws);if(p){const r=p.room;r?.remove(p);clients.delete(p.id);if(r)broadcast(r,{type:"room",room:publicRoom(r,r.players[0]||p)})}
-      }
-      else if(m.type==="rematch"){
-        const p=[...clients.values()].find(x=>x.ws===ws);if(p?.room&&p.room.phase==="lobby")p.room.start();
-      }
-      else if(m.type==="chat"){
-        const p=[...clients.values()].find(x=>x.ws===ws);
-        if(p?.room&&typeof m.message==="string"){
-          const now=Date.now();
-          ws._chatTimes=ws._chatTimes.filter(t=>now-t<10000);
-          if(ws._chatTimes.length>=MAX_CHAT_PER_10S)return send(ws,{type:"error",message:"Chat temporariamente limitado."});
-          ws._chatTimes.push(now);
-          const message=m.message.trim().slice(0,MAX_MESSAGE);
-          if(message)broadcast(p.room,{type:"chat",nickname:p.nickname,message});
-        }
-      }
-      else if(m.type==="leaderboard"){
-        const {rows}=await pool.query("SELECT nickname,skill_points,wins,kills,games FROM players ORDER BY skill_points DESC,wins DESC LIMIT 50");
-        send(ws,{type:"leaderboard",rows});
-      }
-    }catch(e){send(ws,{type:"error",message:"Erro interno. Tente novamente."})}
-  });
-  ws.on("close",()=>{
-    clearInterval(rateTimer);
-    const p=[...clients.values()].find(x=>x.ws===ws);
-    if(p){const r=p.room;r?.remove(p);clients.delete(p.id);if(r&&r.players.length)broadcast(r,{type:"room",room:publicRoom(r,r.players[0])})}
-  });
-});
-
 setInterval(()=>{
-  const now=Date.now();
-  for(const [id,r] of rooms){
-    if(r.phase==="lobby" && now-r.startedAt>MAX_ROOM_AGE_MS && r.startedAt) { r.stop(); rooms.delete(id); }
-  }
-},60000);
-
-initDatabase()
-  .then(()=>server.listen(PORT,()=>console.log(`NEON PATH on :${PORT}`)))
-  .catch(err=>{
-    console.error("DATABASE INIT FAILED:",err);
-    process.exit(1);
-  });
+ const now=Date.now();
+ for(const r of rooms.values()){if(!r.running)continue;for(const p of r.players.values()){if(!p.alive)continue;
+   const dt=TICK/1000, max=MAX_SPEED*(p.boost>0?1.65:1);p.speed+=((9+Math.min(6,(now-r.started)/30000))-p.speed)*.08;p.speed=Math.min(p.speed,max);
+   p.x+=Math.cos(p.a)*p.speed*dt;p.y+=Math.sin(p.a)*p.speed*dt;p.energy=Math.min(100,p.energy+4*dt);p.boost=Math.max(0,p.boost-dt);
+   p.trail.push([+p.x.toFixed(2),+p.y.toFixed(2)]);if(p.trail.length>450)p.trail.shift();if(collision(p,r))p.alive=false;
+ }io.to(r.code).emit("state",snap(r))}
+},TICK);
+server.listen(PORT,()=>console.log(`NEON PATH ${PORT}`));

@@ -1,237 +1,56 @@
-(() => {
-  "use strict";
+import * as THREE from "three";
+const $=id=>document.getElementById(id), socket=io();
+let quality="auto",room="",me="",scene,camera,renderer,world=[],trailMeshes=new Map(),lastState=null,last=performance.now(),keys={};
+$("quality").onclick=()=>{quality=quality==="auto"?"low":quality==="low"?"medium":quality==="medium"?"high":"auto";$("quality").textContent="QUALIDADE: "+quality.toUpperCase();if(renderer)applyQuality()};
+function nick(){return $("nick").value.trim()||"Piloto"}
+function msg(x){$("msg").textContent=x}
+$("create").onclick=()=>{me=nick();socket.emit("room:create",{nickname:me,ceo:false})};
+$("join").onclick=()=>{me=nick();socket.emit("room:join",{nickname:me,code:$("room").value.trim().toUpperCase()})};
+$("rank").onclick=async()=>{try{const r=await fetch("/api/rank");const a=await r.json();msg(a.length?a.map((x,i)=>`${i+1}. ${x.nickname} — ${x.ph} PH`).join(" • "):"Ranking vazio")}catch{msg("Ranking indisponível")}};
+$("start").onclick=()=>socket.emit("room:start");$("back").onclick=()=>location.reload();
+socket.on("connect",()=>msg("ONLINE"));
+socket.on("error:game",x=>msg(x));
+socket.on("room",x=>{room=x.code;$("menu").classList.add("hidden");$("lobby").classList.remove("hidden");$("roomCode").textContent=room;if(x.ceo){$("start").classList.remove("hidden")}});
+socket.on("state",s=>{lastState=s;renderLobby(s)});
+socket.on("start",()=>{ $("lobby").classList.add("hidden");$("game").classList.remove("hidden");init3D()});
+socket.on("hit",x=>{});
+function renderLobby(s){$("players").innerHTML=s.players.map(p=>`<div class="p" style="--c:${p.color}"><span>${escapeHtml(p.nickname)}</span><b>${p.alive?"READY":"OUT"}</b></div>`).join("")}
+function escapeHtml(x){return String(x).replace(/[&<>"']/g,m=>({"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#39;"}[m]))}
+function init3D(){
+ scene=new THREE.Scene();scene.background=new THREE.Color(0x02040b);scene.fog=new THREE.FogExp2(0x02040b,.018);
+ camera=new THREE.PerspectiveCamera(55,innerWidth/innerHeight,.1,400);camera.position.set(0,34,30);camera.lookAt(0,0,0);
+ renderer=new THREE.WebGLRenderer({canvas:$("scene"),antialias:quality!=="low",powerPreference:"high-performance"});renderer.setPixelRatio(Math.min(devicePixelRatio,quality==="high"?1.75:quality==="medium"?1.35:1));renderer.setSize(innerWidth,innerHeight);applyQuality();
+ const amb=new THREE.HemisphereLight(0x5c7cff,0x050509,2);scene.add(amb);
+ const floorMat=new THREE.MeshStandardMaterial({color:0x070b15,roughness:.82,metalness:.25}); const floor=new THREE.Mesh(new THREE.PlaneGeometry(120,80),floorMat);floor.rotation.x=-Math.PI/2;scene.add(floor);
+ const grid=new THREE.GridHelper(120,30,0x073cff,0x10203a);grid.position.y=.02;scene.add(grid); applyEnvironmentTexture();
+ for(let x=-50;x<=50;x+=10) billboard(x,-8,0x102c6e); for(let x=-50;x<=50;x+=10) billboard(x,8,0x3c0b55);
+ const wallMat=new THREE.MeshStandardMaterial({color:0x081b30,emissive:0x001d44,emissiveIntensity:2});
+ for(const [x,z,sx,sz] of [[0,-39,120,1],[0,39,120,1],[-59,0,1,80],[59,0,1,80]]){const m=new THREE.Mesh(new THREE.BoxGeometry(sx,2,sz),wallMat);m.position.set(x,1,z);scene.add(m)}
+ addStars(); window.addEventListener("resize",resize);animate();
+}
 
-  const $ = s => document.querySelector(s);
-  const canvas = $("#game"), ctx = canvas.getContext("2d");
-  const menu = $("#menu"), room = $("#room"), leader = $("#leaderboard"), result = $("#result"), hud = $("#hud"), joinPanel=$("#joinPanel"), createPanel=$("#createPanel");
-  const nickname = $("#nickname"), menuMsg = $("#menuMsg"), roomMsg = $("#roomMsg"), joinMsg=$("#joinMsg"), createMsg=$("#createMsg");
+async function applyEnvironmentTexture(){try{const m=await fetch("/assets-manifest.json").then(r=>r.json());const q=quality==="high"?10:quality==="medium"?4:2;const file=m.environment_textures[Math.floor(Math.random()*q)];const tex=await new THREE.TextureLoader().loadAsync("/"+file);tex.wrapS=tex.wrapT=THREE.RepeatWrapping;tex.repeat.set(3,2);floorMat.map=tex;floorMat.needsUpdate=true;}catch(e){}}
+function billboard(x,z,c){const g=new THREE.PlaneGeometry(9,4);const m=new THREE.MeshBasicMaterial({color:c,transparent:true,opacity:.55,side:THREE.DoubleSide});const o=new THREE.Mesh(g,m);o.position.set(x,2,z);o.lookAt(camera.position);scene.add(o)}
+function addStars(){const n=quality==="low"?180:quality==="medium"?350:600;const geo=new THREE.BufferGeometry(),a=new Float32Array(n*3);for(let i=0;i<n;i++){a[i*3]=(Math.random()-.5)*180;a[i*3+1]=10+Math.random()*50;a[i*3+2]=(Math.random()-.5)*180}geo.setAttribute("position",new THREE.BufferAttribute(a,3));scene.add(new THREE.Points(geo,new THREE.PointsMaterial({color:0x49bfff,size:.18,sizeAttenuation:true})))}
+function vehicle(p){const g=new THREE.Group();const body=new THREE.Mesh(new THREE.BoxGeometry(2.1,.55,3.7),new THREE.MeshStandardMaterial({color:p.color,emissive:new THREE.Color(p.color),emissiveIntensity:1.8,metalness:.7,roughness:.2}));body.position.y=.65;g.add(body);const glow=new THREE.Mesh(new THREE.BoxGeometry(1.5,.1,2.8),new THREE.MeshBasicMaterial({color:p.color,transparent:true,opacity:.55}));glow.position.y=.95;g.add(glow);scene.add(g);return g}
+function updateObjects(s){const alive=s.players.filter(p=>p.alive);$("score").innerHTML=s.players.map(p=>`<div style="color:${p.color}">● ${escapeHtml(p.nickname)} ${p.alive?"":"✕"}</div>`).join("");for(const p of s.players){let o=trailMeshes.get(p.id);if(!o){o=vehicle(p);trailMeshes.set(p.id,o)}o.position.set(p.x-60,.0,p.y-40);o.rotation.y=-p.a+Math.PI/2}}
+function animate(t=performance.now()){requestAnimationFrame(animate);if(lastState)updateObjects(lastState);renderer.render(scene,camera);$("bar").style.width=((lastState?.players.find(p=>p.nickname===me)?.energy??100))+"%";drawMap();$("timer").textContent=new Date((Date.now()-(lastState?.started||Date.now()))).toISOString().slice(14,19)}
+function drawMap(){const c=$("map"),x=c.getContext("2d");x.clearRect(0,0,c.width,c.height);x.strokeStyle="#14345c";x.strokeRect(5,5,170,100);if(!lastState)return;for(const p of lastState.players){x.fillStyle=p.color;x.beginPath();x.arc(5+p.x/120*170,5+p.y/80*100,3,0,Math.PI*2);x.fill()}}
+function applyQuality(){if(!renderer)return;const q=quality==="high"?1.75:quality==="medium"?1.35:quality==="low"?0.8:Math.min(devicePixelRatio,1.35);renderer.setPixelRatio(q)}
+function resize(){camera.aspect=innerWidth/innerHeight;camera.updateProjectionMatrix();renderer.setSize(innerWidth,innerHeight)}
+addEventListener("keydown",e=>{if(e.repeat)return;if(e.key==="ArrowLeft"||e.key.toLowerCase()==="a")socket.emit("input",{type:"left"});if(e.key==="ArrowRight"||e.key.toLowerCase()==="d")socket.emit("input",{type:"right"});if(e.code==="Space")socket.emit("input",{type:"turbo"})});
+$("turbo").onclick=()=>socket.emit("input",{type:"turbo"});$("sab").onclick=()=>socket.emit("input",{type:"sabotage"});
 
-  let ws = null, me = null, roomId = null, state = null, lastFrame = performance.now(), inputSeq = 0;
-  let pressed = new Set(), audioCtx = null, musicTimer = null;
 
-  const COLORS = ["#00f6ff","#ff2bd6","#a8ff00","#ffe600","#8a5cff","#ff6b35","#25ff9a","#ff4f8b","#54a0ff","#d6ff00"];
 
-  function resize(){
-    const dpr = Math.min(devicePixelRatio || 1, 2);
-    canvas.width = innerWidth*dpr; canvas.height = innerHeight*dpr;
-    ctx.setTransform(dpr,0,0,dpr,0,0);
-  }
-  addEventListener("resize", resize); resize();
-
-  function show(which){
-    [menu,room,leader,result,joinPanel,createPanel].filter(Boolean).forEach(x=>x.classList.add("hidden"));
-    if(which) which.classList.remove("hidden");
-  }
-
-  function backendUrl(){
-    const configured = window.NEON_PATH_BACKEND || location.origin;
-    return configured.replace(/^http/, "ws");
-  }
-
-  function connect(){
-    return new Promise((resolve,reject)=>{
-      if(ws && ws.readyState===1) return resolve();
-      ws = new WebSocket(backendUrl());
-      ws.onopen = () => resolve();
-      ws.onerror = () => reject(new Error("Falha de conexão"));
-      ws.onclose = () => {
-        if(state?.phase==="playing"){ $("#hud").classList.add("hidden"); menuMsg.textContent="Conexão perdida."; show(menu); }
-      };
-      ws.onmessage = e => {
-        let m; try{m=JSON.parse(e.data)}catch{return}
-        handle(m);
-      };
-    });
-  }
-
-  function send(type, data={}){
-    if(ws?.readyState===1) ws.send(JSON.stringify({type,...data}));
-  }
-
-  function handle(m){
-    if(m.type==="error"){ menuMsg.textContent=m.message; roomMsg.textContent=m.message; joinMsg.textContent=m.message; createMsg.textContent=m.message; return; }
-    if(m.type==="hello"){ me=m.player; return; }
-    if(m.type==="room"){
-      roomId=m.room.id; $("#roomCode").textContent=roomId;
-      renderRoom(m.room); show(room); return;
-    }
-    if(m.type==="leaderboard"){ renderLeaders(m.rows); show(leader); return; }
-    if(m.type==="state"){
-      state=m.state;
-      if(state.phase==="playing"){ menu.classList.add("hidden"); room.classList.add("hidden"); result.classList.add("hidden"); hud.classList.remove("hidden"); }
-      if(state.phase==="result") finish(state);
-      renderHud(state);
-      return;
-    }
-    if(m.type==="chat") addChat(m.nickname,m.message);
-  }
-
-  async function join(mode="quick", extra={}){
-    const name=(nickname.value||"").trim();
-    if(name.length<2){menuMsg.textContent="Digite um apelido de 2 a 18 caracteres.";return}
-    try{
-      menuMsg.textContent="Conectando...";
-      await connect();
-      send("join",{nickname:name, mode, ...extra});
-      startAudio();
-    }catch(e){menuMsg.textContent="Servidor indisponível. Confira a URL do Render."}
-  }
-
-  const bind = (selector, event, fn) => { const el=$(selector); if(el) el.addEventListener(event, fn); };
-
-  bind("#joinExistingBtn","click",()=>{ if(joinMsg) joinMsg.textContent=""; show(joinPanel); $("#roomCodeInput")?.focus(); });
-  bind("#joinCancelBtn","click",()=>show(menu));
-  bind("#joinConfirmBtn","click",()=>{
-    const code=($("#roomCodeInput")?.value||"").trim().toUpperCase();
-    if(!code){if(joinMsg) joinMsg.textContent="Digite o código da sala.";return}
-    const key=($("#joinKey")?.value||"").trim();
-    if(joinMsg) joinMsg.textContent="Conectando...";
-    join("join_room",{roomId:code,key});
-  });
-
-  bind("#roomBtn","click",()=>{if(createMsg) createMsg.textContent="";$("#ceoKeyBox")?.classList.add("hidden");show(createPanel)});
-  bind("#normalCreateBtn","click",()=>join("create"));
-  bind("#ceoCreateBtn","click",()=>{$("#ceoKeyBox")?.classList.remove("hidden");$("#ceoKey")?.focus()});
-  bind("#ceoConfirmBtn","click",()=>{
-    const key=($("#ceoKey")?.value||"").trim();
-    if(!key){if(createMsg) createMsg.textContent="Digite a chave CEO.";return}
-    if(createMsg) createMsg.textContent="Validando chave...";
-    join("create_ceo",{key});
-  });
-  bind("#createCancelBtn","click",()=>show(menu));
-  bind("#leaderBtn","click",async()=>{try{await connect();send("leaderboard")}catch{menuMsg.textContent="Servidor indisponível."}});
-  bind("#backBtn","click",()=>show(menu));
-  bind("#startBtn","click",()=>send("start"));
-  bind("#leaveBtn","click",()=>{send("leave");show(menu)});
-  bind("#againBtn","click",()=>{send("rematch");show(room)});
-  bind("#resultHomeBtn","click",()=>{send("leave");show(menu)});
-
-  addEventListener("keydown", e=>{
-    if(["INPUT","TEXTAREA"].includes(document.activeElement?.tagName)) return;
-    if(["ArrowLeft","ArrowRight","a","A","d","D"," ","e","E"].includes(e.key)) e.preventDefault();
-    pressed.add(e.key.toLowerCase());
-    if(e.key==="Enter") sendChat();
-    if(e.key.toLowerCase()==="t") $("#chat").classList.toggle("hidden");
-  });
-  addEventListener("keyup", e=>pressed.delete(e.key.toLowerCase()));
-
-  document.querySelectorAll(".mobile-controls button").forEach(b=>{
-    const k=b.dataset.key;
-    b.addEventListener("pointerdown",()=>pressed.add(k));
-    b.addEventListener("pointerup",()=>pressed.delete(k));
-    b.addEventListener("pointercancel",()=>pressed.delete(k));
-  });
-
-  let lastInput=0;
-  function inputLoop(now){
-    if(now-lastInput>45 && state?.phase==="playing"){
-      let left=pressed.has("arrowleft")||pressed.has("a")||pressed.has("left");
-      let right=pressed.has("arrowright")||pressed.has("d")||pressed.has("right");
-      let turbo=pressed.has(" ")||pressed.has("turbo");
-      let breath=pressed.has("e")||pressed.has("breath");
-      if(left||right||turbo||breath){
-        send("input",{left,right,turbo,breath,seq:++inputSeq});
-        lastInput=now;
-      }
-    }
-    requestAnimationFrame(inputLoop);
-  }
-  requestAnimationFrame(inputLoop);
-
-  $("#chatInput").addEventListener("keydown",e=>{if(e.key==="Enter"){e.preventDefault();sendChat()}});
-  function sendChat(){const el=$("#chatInput");if(el.value.trim()){send("chat",{message:el.value.trim()});el.value=""}}
-
-  function renderRoom(r){
-    $("#roomPlayers").innerHTML=r.players.map(p=>`<div class="player-row"><span>${esc(p.nickname)}</span><b>${p.ready?"READY":"WAIT"}</b></div>`).join("");
-    $("#startBtn").disabled = !r.canStart;
-    roomMsg.textContent = r.ceoOnly ? "SALA CEO • você pode iniciar sozinho para teste." : (r.players.length<2 ? "Aguardando mais jogadores..." : "Pronto para começar.");
-  }
-
-  function renderLeaders(rows){
-    $("#leaders").innerHTML=rows.map((p,i)=>`<div class="leader"><span class="rank">#${i+1}</span><strong>${esc(p.nickname)}</strong><span class="ph">${p.skill_points} PH</span></div>`).join("");
-  }
-
-  function renderHud(s){
-    if(!s)return;
-    $("#roundTime").textContent=formatTime(s.time);
-    $("#zoneText").textContent=Math.round(s.zone*100)+"%";
-    const self=s.players.find(p=>p.id===me?.id);
-    $("#turboBar").style.width=(self?.energy??0)+"%";
-    $("#breathBar").style.width=(self?.breath??0)+"%";
-    $("#scoreboard").innerHTML=s.players.slice().sort((a,b)=>b.alive-a.alive || b.kills-a.kills).map(p=>{
-      const c=COLORS[p.colorIndex%COLORS.length];
-      return `<div class="score-row"><i class="dot" style="color:${c};background:${c}"></i><span>${esc(p.nickname)}</span><span class="alive">${p.alive?"●":"×"}</span></div>`;
-    }).join("");
-  }
-
-  function finish(s){
-    hud.classList.add("hidden"); show(result);
-    const w=s.players.find(p=>p.id===s.winnerId);
-    $("#winnerName").textContent=w?.nickname||"Ninguém";
-    $("#resultStats").innerHTML=s.players.slice().sort((a,b)=>b.kills-a.kills).slice(0,4).map(p=>`<div class="stat-card">${esc(p.nickname)} — ${p.kills} KILL · ${p.distance}m</div>`).join("");
-  }
-
-  function addChat(n,m){
-    const log=$("#chatLog"); log.innerHTML+=`<div><b>${esc(n)}:</b> ${esc(m)}</div>`; log.scrollTop=log.scrollHeight;
-  }
-
-  function esc(s){return String(s).replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]))}
-  function formatTime(sec){sec=Math.floor(sec||0);return `${Math.floor(sec/60)}:${String(sec%60).padStart(2,"0")}`}
-
-  function startAudio(){
-    if(audioCtx)return;
-    try{
-      audioCtx=new (AudioContext||webkitAudioContext)();
-      const gain=audioCtx.createGain(); gain.gain.value=.025; gain.connect(audioCtx.destination);
-      musicTimer=setInterval(()=>{
-        if(!audioCtx || state?.phase!=="playing")return;
-        const osc=audioCtx.createOscillator(); osc.type="sawtooth";
-        osc.frequency.value=[110,146.83,164.81,220][Math.floor(Math.random()*4)];
-        osc.connect(gain);osc.start();osc.stop(audioCtx.currentTime+.09);
-      },180);
-    }catch{}
-  }
-
-  function draw(){
-    const now=performance.now(), dt=Math.min((now-lastFrame)/1000,.05); lastFrame=now;
-    renderArena(dt); requestAnimationFrame(draw);
-  }
-
-  function renderArena(dt){
-    const w=innerWidth,h=innerHeight;
-    ctx.fillStyle="#03040a";ctx.fillRect(0,0,w,h);
-    if(!state){drawMenuGrid(w,h);return}
-    const pad=Math.min(w,h)*.07;
-    const ax=pad,ay=pad+10,aw=w-pad*2,ah=h-pad*2-20;
-    ctx.save();
-    ctx.translate(ax,ay);
-    ctx.strokeStyle="#0b2440";ctx.lineWidth=1;
-    for(let x=0;x<=aw;x+=40){ctx.beginPath();ctx.moveTo(x,0);ctx.lineTo(x,ah);ctx.stroke()}
-    for(let y=0;y<=ah;y+=40){ctx.beginPath();ctx.moveTo(0,y);ctx.lineTo(aw,y);ctx.stroke()}
-    const zone=(state.zone??1);
-    ctx.strokeStyle="#ff2bd6";ctx.globalAlpha=.18;ctx.lineWidth=4;
-    ctx.strokeRect(aw*(1-zone)/2,ah*(1-zone)/2,aw*zone,ah*zone);ctx.globalAlpha=1;
-    for(const p of state.players){
-      const c=COLORS[p.colorIndex%COLORS.length];
-      if(p.trail?.length){
-        ctx.save();ctx.strokeStyle=c;ctx.shadowColor=c;ctx.shadowBlur=14;ctx.lineWidth=4;ctx.lineJoin="round";
-        ctx.beginPath();p.trail.forEach((q,i)=>{const x=q[0]*aw,y=q[1]*ah;i?ctx.lineTo(x,y):ctx.moveTo(x,y)});ctx.stroke();ctx.restore();
-      }
-      if(p.alive){
-        const x=p.x*aw,y=p.y*ah;
-        ctx.save();ctx.translate(x,y);ctx.rotate(p.angle);ctx.shadowColor=c;ctx.shadowBlur=22;
-        ctx.fillStyle=c;ctx.beginPath();ctx.moveTo(13,0);ctx.lineTo(-10,-7);ctx.lineTo(-7,0);ctx.lineTo(-10,7);ctx.closePath();ctx.fill();
-        ctx.fillStyle="#fff";ctx.beginPath();ctx.arc(2,0,2,0,Math.PI*2);ctx.fill();ctx.restore();
-      }
-    }
-    ctx.restore();
-  }
-
-  function drawMenuGrid(w,h){
-    ctx.strokeStyle="#0b1020";ctx.lineWidth=1;
-    for(let x=0;x<w;x+=50){ctx.beginPath();ctx.moveTo(x,0);ctx.lineTo(x,h);ctx.stroke()}
-    for(let y=0;y<h;y+=50){ctx.beginPath();ctx.moveTo(0,y);ctx.lineTo(w,y);ctx.stroke()}
-  }
-
-  draw();
-})();
+// NEON PATH 4.0 — real resources, lazy loaded by quality.
+const RESOURCE_BASE="/";
+async function preloadResources(level="auto"){
+  try{
+    const m=await fetch(RESOURCE_BASE+"assets-manifest.json",{cache:"no-store"}).then(r=>r.json());
+    const count=level==="low"?2:level==="medium"?4:level==="high"?10:4;
+    const files=[...m.environment_textures.slice(0,count),...m.sky_billboards.slice(0,Math.max(1,Math.ceil(count/2)))];
+    await Promise.all(files.map(src=>fetch(RESOURCE_BASE+src,{cache:"force-cache"}).catch(()=>null)));
+  }catch(e){}
+}
+preloadResources(quality);
