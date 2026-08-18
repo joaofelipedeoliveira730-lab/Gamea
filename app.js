@@ -45,15 +45,66 @@ const api=async(path,opts={})=>{
 function escapeHtml(x){return String(x).replace(/[&<>"']/g,m=>({"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#39;"}[m]));}
 function show(id){document.querySelectorAll("#app>.screen,#app>#game").forEach(e=>e.classList.add("hidden"));$(id)?.classList.remove("hidden");}
 function message(t){$("msg").textContent=t||"";}
+let fullscreenBusy=false;
 async function requestFullscreenLandscape(){
- try{ if(!document.fullscreenElement) await document.documentElement.requestFullscreen({navigationUI:"hide"}); }catch{}
- try{ if(screen.orientation?.lock) await screen.orientation.lock("landscape"); }catch{}
- document.documentElement.classList.add("race-landscape");
+  // Android/Chrome is stricter about fullscreen: keep the API call directly in the
+  // user gesture, do not pass optional arguments, and try vendor fallbacks.
+  if(fullscreenBusy) return !!document.fullscreenElement;
+  fullscreenBusy=true;
+  let entered=!!document.fullscreenElement;
+  try{
+    if(!entered){
+      const root=document.documentElement;
+      const fn=root.requestFullscreen||root.webkitRequestFullscreen||root.msRequestFullscreen;
+      if(fn){
+        try{ await fn.call(root); }
+        catch(e){
+          // Some WebViews reject the promise after accepting the gesture. Retry once.
+          try{ await Promise.resolve(fn.call(root)); }catch{}
+        }
+      }
+    }
+    entered=!!(document.fullscreenElement||document.webkitFullscreenElement||document.msFullscreenElement);
+    // Orientation lock only works in fullscreen on supported Android browsers.
+    if(entered && screen.orientation?.lock){
+      try{ await screen.orientation.lock("landscape"); }catch{
+        try{ await screen.orientation.lock("landscape-primary"); }catch{}
+      }
+    }
+  }finally{
+    fullscreenBusy=false;
+    document.documentElement.classList.toggle("race-landscape",entered);
+    document.documentElement.dataset.fullscreen=entered?"1":"0";
+    $("rotateNotice")?.classList.toggle("fullscreen-active",entered);
+    setTimeout(()=>resize(),80);
+  }
+  if(!entered && isTouchDevice && $("rotateFullscreen")){
+    $("rotateFullscreen").textContent="TENTAR TELA CHEIA NOVAMENTE";
+    $("rotateFullscreen").classList.add("fullscreen-failed");
+  }
+  return entered;
 }
-function releaseFullscreen(){try{if(document.fullscreenElement)document.exitFullscreen().catch(()=>{});}catch{}}
-addEventListener("fullscreenchange",()=>{if(gameRunning)resize();});
+function releaseFullscreen(){
+  try{
+    const fn=document.exitFullscreen||document.webkitExitFullscreen||document.msExitFullscreen;
+    if(fn && (document.fullscreenElement||document.webkitFullscreenElement||document.msFullscreenElement)) Promise.resolve(fn.call(document)).catch(()=>{});
+  }catch{}
+  document.documentElement.classList.remove("race-landscape");
+  document.documentElement.dataset.fullscreen="0";
+}
+addEventListener("fullscreenchange",()=>{
+  const active=!!(document.fullscreenElement||document.webkitFullscreenElement||document.msFullscreenElement);
+  document.documentElement.classList.toggle("race-landscape",active);
+  document.documentElement.dataset.fullscreen=active?"1":"0";
+  $("rotateNotice")?.classList.toggle("fullscreen-active",active);
+  setTimeout(()=>resize(),80);
+});
+addEventListener("webkitfullscreenchange",()=>dispatchEvent(new Event("fullscreenchange")));
 addEventListener("orientationchange",()=>{setTimeout(resize,120);});
-$("rotateFullscreen").onclick=()=>requestFullscreenLandscape();
+$("rotateFullscreen").onclick=async()=>{
+  const ok=await requestFullscreenLandscape();
+  if(ok) $("rotateFullscreen").textContent="TELA CHEIA ATIVADA";
+};
 async function showTermsGate(){
  $("termsGate").classList.remove("hidden");$("termsAccept").checked=false;$("downloadResources").disabled=true;$("continueWithoutDownload").disabled=true;
  const cached=localStorage.getItem("neon_resources_v1")==="ready";
@@ -593,7 +644,7 @@ bindHold('touchLeft','left');bindHold('touchRight','right');bindDrift('touchDrif
 $('turbo').onclick=()=>socket.connected&&socket.emit('input',{type:'turbo'});$('sab').onclick=()=>socket.connected&&$('sab').classList.contains('item-ready')&&socket.emit('input',{type:'sabotage'});
 $('touchTurbo').onclick=()=>socket.connected&&socket.emit('input',{type:'turbo'});$('touchItem').onclick=()=>socket.connected&&$('touchItem').classList.contains('item-ready')&&socket.emit('input',{type:'sabotage'});
 bindActionHold('touchAccelerate','throttle');bindActionHold('touchBrake','brake');
-function exitRace(){gameRunning=false;try{socket.emit("room:leave");}catch{}playerMeshes.clear();if(scene){scene.traverse(o=>{if(o.geometry)o.geometry.dispose?.();if(o.material){const ms=Array.isArray(o.material)?o.material:[o.material];ms.forEach(m=>{m.map?.dispose?.();m.dispose?.();});}});}show("menu");message("Você saiu da corrida.");}
+function exitRace(){gameRunning=false;releaseFullscreen();try{socket.emit("room:leave");}catch{}playerMeshes.clear();if(scene){scene.traverse(o=>{if(o.geometry)o.geometry.dispose?.();if(o.material){const ms=Array.isArray(o.material)?o.material:[o.material];ms.forEach(m=>{m.map?.dispose?.();m.dispose?.();});}});}show("menu");message("Você saiu da corrida.");}
 $("raceExit").onclick=exitRace;
 function showFinish(results,track){
  gameRunning=false;show("finish");
