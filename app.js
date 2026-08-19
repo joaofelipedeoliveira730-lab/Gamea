@@ -1,7 +1,13 @@
 import * as THREE from "three";
 
 const $=id=>document.getElementById(id);
-const socket=io({transports:["websocket","polling"]});
+const socket=typeof io==="function" ? io({transports:["websocket","polling"],autoConnect:true,reconnection:true,reconnectionAttempts:Infinity,reconnectionDelay:500,reconnectionDelayMax:3000}) : {
+  connected:false,
+  on(){return this;},
+  emit(){return false;},
+  connect(){return this;},
+  disconnect(){return this;}
+};
 let quality=localStorage.getItem("neon_quality")||"auto";
 const isTouchDevice=matchMedia("(pointer:coarse)").matches || navigator.maxTouchPoints>0;
 const DEVICE_LOW=(navigator.deviceMemory&&navigator.deviceMemory<=3)||(navigator.hardwareConcurrency&&navigator.hardwareConcurrency<=4);
@@ -12,7 +18,7 @@ function effectiveQuality(){
 }
 let authToken=localStorage.getItem("neon_token")||"";
 let currentUser="Piloto", selectedCharacter=0, selectedTrack="neon-city", pendingAction="quick";
-let renderer,scene,camera,clock,playerMeshes=new Map(),itemBoxes=[],worldGroup,environmentGroup,environmentSeed=0,particles,trackDef,lastState,lastRaceStart=0,gameRunning=false,roomMode="room",trackBackdrop=null,trackTextureLoader=new THREE.TextureLoader(),backdropPromise=Promise.resolve(),loadingTimer=null;
+let renderer,scene,camera,clock,playerMeshes=new Map(),itemBoxes=[],worldGroup,environmentGroup,environmentSeed=0,particles,trackDef,lastState,lastRaceStart=0,gameRunning=false,roomMode="room",trackBackdrop=null,trackTextureLoader=new THREE.TextureLoader(),backdropPromise=Promise.resolve(),loadingTimer=null,raceStartWatchdog=null,raceStarting=false;
 let lastFrameTime=performance.now();
 let keys={left:false,right:false,drift:false,accelerate:false,brake:false}, touchTimer=null, cameraTarget=new THREE.Vector3(), cameraLook=new THREE.Vector3(), renderFrame=0;
 
@@ -45,6 +51,63 @@ const api=async(path,opts={})=>{
 function escapeHtml(x){return String(x).replace(/[&<>"']/g,m=>({"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#39;"}[m]));}
 function show(id){document.querySelectorAll("#app>.screen,#app>#game").forEach(e=>e.classList.add("hidden"));$(id)?.classList.remove("hidden");}
 function message(t){$("msg").textContent=t||"";}
+
+// ===== AUTO BUG RECOVERY / CEO REPORTING =====
+let bugRecoveryTimer=null, bugRecoverySeconds=15, lastBugFingerprint="", lastBugAt=0, recoveryAttempts=0;
+function bugFingerprint(message,source){
+  const raw=`${source||"client"}|${message||"unknown"}|${location.pathname}`;
+  let h=2166136261; for(let i=0;i<raw.length;i++){h^=raw.charCodeAt(i);h=Math.imul(h,16777619);} return (h>>>0).toString(16);
+}
+async function reportBug(err,{source="client",message:msg,stack}={}){
+  const text=String(msg||err?.message||err||"Erro desconhecido").slice(0,1000);
+  const fp=bugFingerprint(text,source), now=Date.now();
+  if(fp===lastBugFingerprint && now-lastBugAt<15000)return;
+  lastBugFingerprint=fp;lastBugAt=now;
+  try{await fetch("/api/bug-report",{method:"POST",headers:{"Content-Type":"application/json",...(authToken?{Authorization:"Bearer "+authToken}:{})},body:JSON.stringify({fingerprint:fp,message:text,stack:String(stack||err?.stack||"").slice(0,6000),source,screen:document.querySelector("#game:not(.hidden)")?"game":(document.querySelector(".screen:not(.hidden)")?.id||"unknown"),track:trackDef?.id||selectedTrack,mode:roomMode})});}catch{}
+}
+function showBugRecovery(title="OPS! O JOGO ENCONTROU UM PROBLEMA",text="O erro foi registrado automaticamente. O jogo vai tentar continuar com segurança."){
+  const box=$("bugRecovery");if(!box)return;
+  $("bugRecoveryTitle").textContent=title;$("bugRecoveryText").textContent=text;
+  bugRecoverySeconds=15;$("bugRecoveryTimer").textContent="Fechando em 15s...";box.classList.remove("hidden");
+  clearInterval(bugRecoveryTimer);bugRecoveryTimer=setInterval(()=>{bugRecoverySeconds--;if(bugRecoverySeconds<=0){clearInterval(bugRecoveryTimer);box.classList.add("hidden");return;}$("bugRecoveryTimer").textContent=`Fechando em ${bugRecoverySeconds}s...`;},1000);
+}
+function closeBugRecovery(){clearInterval(bugRecoveryTimer);$("bugRecovery")?.classList.add("hidden");}
+$("bugRecoveryClose")?.addEventListener("click",closeBugRecovery);
+async function handleClientFault(err,source="runtime"){
+  const text=String(err?.message||err||"Erro desconhecido");
+  console.error("NEON PATH AUTO-RECOVERY",source,err);
+  await reportBug(err,{source});
+  showBugRecovery("ERRO RECUPERADO", "Detectamos uma falha e enviamos um relatório automático para o CEO. O jogo será recuperado sem travar a sessão.");
+  if(gameRunning){
+    gameRunning=false;
+    if(recoveryAttempts<2){
+      recoveryAttempts++;
+      setTimeout(()=>{try{recoverRaceAfterRenderError(trackDef?.id||selectedTrack);}catch{}},450);
+    }else{
+      setTimeout(()=>{recoveryAttempts=0;show("menu");message("A corrida foi encerrada com segurança. O erro foi enviado ao CEO.");try{socket.emit("room:leave");}catch{}},1800);
+    }
+  }
+  return text;
+}
+window.addEventListener("error",e=>{if(e?.error||e?.message)handleClientFault(e.error||new Error(e.message),"window-error");});
+window.addEventListener("unhandledrejection",e=>handleClientFault(e.reason||new Error("Promise rejeitada"),"unhandled-rejection"));
+
+function ceoKey(){return window.__ceoKey||sessionStorage.getItem("neon_ceo_key")||"";}
+function renderCEOReports(data){
+ const box=$("ceoReports"), reports=data?.reports||[];
+ if(!reports.length){box.innerHTML='<div class="ceo-empty">✓ Nenhum bug registrado ainda.</div>';return;}
+ box.innerHTML=reports.map(r=>`<article class="bug-report ${r.resolved?"resolved":"open"}"><div class="bug-report-head"><b>${escapeHtml(r.message||"Erro")}</b><span>${r.resolved?"RESOLVIDO":"ABERTO"}</span></div><div class="bug-meta">${escapeHtml(r.nickname||"Piloto")} · ${escapeHtml(r.source||"client")} · ${escapeHtml(r.screen||"?")} · ${escapeHtml(r.track||"?")} · ${new Date(r.createdAt||Date.now()).toLocaleString("pt-BR")}</div><code>${escapeHtml((r.stack||r.fingerprint||"").slice(0,1400))}</code>${!r.resolved?`<button class="secondary-btn resolve-bug" data-bug-id="${r.id}">MARCAR RESOLVIDO</button>`:""}</article>`).join("");
+ box.querySelectorAll(".resolve-bug").forEach(b=>b.onclick=async()=>{try{await fetch(`/api/ceo/bug-reports/${encodeURIComponent(b.dataset.bugId)}/resolve`,{method:"POST",headers:{"X-CEO-Key":ceoKey()}});loadCEOReports();}catch{}});
+}
+async function loadCEOReports(){
+ const key=ceoKey(); if(!key){$("ceoReports").innerHTML='<div class="ceo-empty">Chave CEO não informada.</div>';return;}
+ $("ceoReports").innerHTML='<div class="modal-muted">Carregando relatórios...</div>';
+ try{const r=await fetch("/api/ceo/bug-reports",{headers:{"X-CEO-Key":key}});const d=await r.json();if(!r.ok)throw new Error(d.error||"Acesso negado");renderCEOReports(d);}catch(e){$("ceoReports").innerHTML=`<div class="ceo-empty">Não foi possível abrir os relatórios: ${escapeHtml(e.message)}</div>`;}
+}
+function openCEO(){
+ const key=prompt("Chave CEO:",ceoKey()); if(!key)return; window.__ceoKey=key;sessionStorage.setItem("neon_ceo_key",key);$("ceoPanel").classList.remove("hidden");loadCEOReports();
+}
+$("ceoClose")?.addEventListener("click",()=>$("ceoPanel").classList.add("hidden"));$("ceoRefresh")?.addEventListener("click",loadCEOReports);
 let fullscreenBusy=false;
 async function requestFullscreenLandscape(){
   // Android/Chrome is stricter about fullscreen: keep the API call directly in the
@@ -195,7 +258,7 @@ $("privateJoinBtn").onclick=()=>{
  if(!password){$("privateMsg").textContent="Digite a senha da sala.";return;}
  closePrivate();currentUser=$("menuNick").textContent||currentUser;socket.emit("room:join",{nickname:currentUser,code,password,characterId:selectedCharacter});
 };
-$("ceoBtn").onclick=()=>{const key=prompt("Chave CEO:");if(!key)return;pendingAction="ceo";openTracks();window.__ceoKey=key;};
+$("ceoBtn").onclick=()=>openCEO();
 async function beginRoom(ceo=false,forceSolo=false){
  currentUser=$("menuNick").textContent||currentUser;
  if(ceo||pendingAction==="ceo") socket.emit("room:create",{nickname:currentUser,ceo:true,key:window.__ceoKey,track:selectedTrack,characterId:selectedCharacter});
@@ -228,7 +291,7 @@ socket.on("state",s=>{lastState=s;if(!$("lobby").classList.contains("hidden"))re
 $("start").onclick=()=>socket.emit("room:start");
 $("ceoTrack").onchange=e=>socket.emit("room:track",e.target.value);
 $("back").onclick=()=>{socket.emit("room:leave");show("menu");};
-socket.on("race:loading",()=>{ showLoading(lastState?.track||selectedTrack); });
+socket.on("race:loading",()=>{ const id=lastState?.track||selectedTrack; showLoading(id); armRaceStartWatchdog(id); });
 socket.on("race:countdown",x=>{
  requestFullscreenLandscape();
  const el=$("countdown"); if(!el)return;
@@ -236,10 +299,21 @@ socket.on("race:countdown",x=>{
  el.classList.toggle('go',x.value==='GO');
  if(x.value==='GO')setTimeout(()=>el.classList.add('hidden'),700);
 });
-socket.on("start",x=>{requestFullscreenLandscape();startGame(x.track);});
+socket.on("start",x=>{ disarmRaceStartWatchdog(); requestFullscreenLandscape().catch?.(()=>{}); startGame(x.track); });
 socket.on("hit",x=>showHit(x));
 socket.on("race:finish",x=>showFinish(x.results,x.track));
 
+function armRaceStartWatchdog(id){
+ clearTimeout(raceStartWatchdog);
+ raceStartWatchdog=setTimeout(()=>{
+   if(gameRunning || raceStarting || $("game")?.classList.contains("hidden")===false)return;
+   const text="A partida demorou mais que o esperado para iniciar.";
+   reportBug(new Error(text),{source:"race-start-timeout"});
+   showBugRecovery("RECUPERAÇÃO AUTOMÁTICA", "A partida não respondeu a tempo. Vamos iniciar o modo seguro sem apagar sua sessão.");
+   try{startGame(id,{watchdog:true});}catch{}
+ },8000);
+}
+function disarmRaceStartWatchdog(){clearTimeout(raceStartWatchdog);raceStartWatchdog=null;}
 function showLoading(id){
  if(loadingTimer){clearInterval(loadingTimer);loadingTimer=null;}
  const t=TRACKS.find(x=>x.id===id)||TRACKS[0];
@@ -519,15 +593,18 @@ function buildEmergencyTrack(t){
 function buildRaceWorldSafe(t){
   try{buildTrack(t);buildParticles();return true;}
   catch(err){
-    console.error('NEON PATH 3D world detail failed; using emergency track:',err);
+    console.error('NEON PATH 3D world detail failed; using emergency track:',err); reportBug(err,{source:"world-build"});
     try{buildEmergencyTrack(t);return false;}catch(fatal){console.error('NEON PATH emergency track failed:',fatal);return false;}
   }
 }
 
-async function startGame(id){
+async function startGame(id,{watchdog=false}={}){
+ if(raceStarting && !watchdog)return;
+ raceStarting=true;
  try{
+  disarmRaceStartWatchdog();
   if(loadingTimer){clearInterval(loadingTimer);loadingTimer=null;}
-  gameRunning=true;playerMeshes.clear();trackDef=TRACKS.find(t=>t.id===id)||TRACKS[0];
+  gameRunning=false;playerMeshes.clear();trackDef=TRACKS.find(t=>t.id===id)||TRACKS[0];
   showLoading(trackDef.id);
   const loadingStarted=performance.now();
   setupRenderer();
@@ -552,8 +629,9 @@ async function startGame(id){
   lastRaceStart=Date.now();
   lastFrameTime=performance.now();
   animate();
+  raceStarting=false;
  }catch(err){
-  console.error('NEON PATH race boot failed',err);
+  console.error('NEON PATH race boot failed',err); reportBug(err,{source:"race-boot"}); showBugRecovery("PISTA RECUPERADA", "O motor 3D encontrou um erro. O modo seguro está sendo ativado.");
   gameRunning=false;
   document.querySelector('.loading-shell')?.classList.remove('slow');
   $('loadingTitle').textContent='INICIANDO PISTA SEGURA';
@@ -567,14 +645,14 @@ async function startGame(id){
     scene.add(new THREE.HemisphereLight(0xb7d8ff,0x24402d,2.2));
     const sun=new THREE.DirectionalLight(0xffffff,2.2);sun.position.set(30,55,25);sun.castShadow=false;scene.add(sun);
     buildEmergencyTrack(trackDef);
-    show('game');lastRaceStart=Date.now();lastFrameTime=performance.now();gameRunning=true;animate();
+    show('game');lastRaceStart=Date.now();lastFrameTime=performance.now();gameRunning=true;raceStarting=false;animate();
   }catch(fatal){
-    console.error('NEON PATH fatal race boot:',fatal);
+    console.error('NEON PATH fatal race boot:',fatal); reportBug(fatal,{source:"race-boot-fatal"}); showBugRecovery("MODO SEGURO", "O motor 3D não iniciou normalmente. O erro foi enviado ao CEO.");
     $('loadingSub').textContent='NÃO FOI POSSÍVEL INICIAR O MOTOR 3D. ATUALIZE A PÁGINA.';
     gameRunning=false;
+    raceStarting=false;
   }
- }
-}}
+ }}
 function updateCars(s,dt=.016){
  const sorted=[...s.players].sort((a,b)=>b.progress-a.progress);
  $('score').innerHTML=sorted.map((p,i)=>{const c=CHARACTERS.find(x=>x.id===p.characterId)||CHARACTERS[i%CHARACTERS.length];return `<div class="race-player" style="--c:${p.color}"><span class="race-rank">${i+1}</span><img src="${c.portrait}" alt=""><b>${escapeHtml(p.nickname)}</b></div>`}).join('');
@@ -610,7 +688,7 @@ function animate(){
   if(renderer&&scene&&camera)renderer.render(scene,camera);
   $('timer').textContent=new Date(Date.now()-lastRaceStart).toISOString().slice(14,19);
  }catch(err){
-  console.error('NEON PATH render loop recovered:',err);
+  console.error('NEON PATH render loop recovered:',err); handleClientFault(err,"render-loop");
   gameRunning=false;
   setTimeout(()=>{ if(!gameRunning) recoverRaceAfterRenderError(trackDef?.id||selectedTrack); },0);
  }
@@ -626,7 +704,7 @@ function recoverRaceAfterRenderError(id){
   buildEmergencyTrack(trackDef);
   show('game');lastRaceStart=lastRaceStart||Date.now();lastFrameTime=performance.now();gameRunning=true;animate();
  }catch(err){
-  console.error('NEON PATH render recovery failed:',err);
+  console.error('NEON PATH render recovery failed:',err); reportBug(err,{source:"render-recovery"}); showBugRecovery("RECUPERAÇÃO FALHOU", "A corrida foi encerrada com segurança e o erro foi enviado ao CEO.");
   gameRunning=false;
   show('menu');
   message('Não foi possível iniciar o motor 3D. Tente novamente.');
