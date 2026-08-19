@@ -13,7 +13,7 @@
   <link rel="preload" href="loading-hero.webp" as="image" type="image/webp">
   <link rel="stylesheet" href="style.css">
   <script src="config.js"></script>
-  <script src="/socket.io/socket.io.js"></script>
+  <script src="https://cdn.socket.io/4.8.1/socket.io.min.js" crossorigin="anonymous"></script>
   <script type="importmap">{"imports":{"three":"https://cdn.jsdelivr.net/npm/three@0.178.0/build/three.module.js"}}</script>
 </head>
 <body>
@@ -91,7 +91,7 @@
         <div id="registerForm" class="auth-form hidden"><label for="registerNick">APELIDO</label><input id="registerNick" maxlength="20" autocomplete="username" placeholder="Escolha seu apelido"><label for="registerPassword">SENHA</label><input id="registerPassword" type="password" minlength="8" maxlength="200" autocomplete="new-password" placeholder="Mínimo de 8 caracteres"><label for="registerEmail">E-MAIL <span>OPCIONAL</span></label><input id="registerEmail" type="email" maxlength="160" autocomplete="email" placeholder="Recuperação futura da conta"><button id="registerBtn" class="primary" type="button">CRIAR PILOTO</button><button id="toLogin" class="text-btn" type="button">Já tenho conta</button></div>
         <div id="authMsg" class="form-message" aria-live="polite"></div>
       </div>
-      <footer class="version">NEON PATH · V12.0 PRESTIGE · WEB EDITION</footer>
+      <footer class="version">NEON PATH · V12.0.4 PRESTIGE · WEB EDITION</footer>
     </div>
   </section>
 

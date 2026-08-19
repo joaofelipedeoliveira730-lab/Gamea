@@ -1,4 +1,4 @@
-NEON PATH 12.0.1 · RESULTADO DE QA
+NEON PATH 12.0.4 · RESULTADO DE QA
 
 PASS · Sintaxe: app.js, server.js, game-core.js e service-worker.js
 PASS · 540 corridas completas simuladas em 3 modos e 9 circuitos
@@ -8,7 +8,7 @@ PASS · 10.000 payloads hostis rejeitados
 PASS · 165 IDs de interface validados, sem ausências ou duplicatas
 PASS · Layouts desktop, tablet, celular paisagem e celular retrato
 PASS · Safe areas, toque, movimento reduzido e qualidade adaptativa
-PASS · Shell inicial: aproximadamente 348 KiB
+PASS · Shell inicial: aproximadamente 350 KiB
 PASS · Pacote Essencial: aproximadamente 2,01 MiB
 PASS · Cinemática: H.264, 1280x720, 8,5 s, menos de 1,5 MiB
 PASS · Trilha: MP3, 29,1 s, menos de 600 KiB
@@ -16,6 +16,14 @@ PASS · PWA, cache versionado e bypass de API/Socket/Range
 PASS · PostgreSQL preservado por migrações aditivas
 PASS · Colunas de bancos legados criadas antes de todos os índices dependentes
 PASS · CLIENT_ORIGIN opcional e normalizado com ou sem barra final
+PASS · Loja e inventário isolados de shop_items/player_items legadas com CHECKs incompatíveis
+PASS · Cadastro e convidado simulados contra users legada com username/password obrigatórios
+PASS · Estado de largada preserva userId, botSkill e cosméticos
+PASS · Reconexão autenticada mantém a vaga por 12 segundos
+PASS · Falha ao abrir conexão de prêmio não interrompe o encerramento da corrida
+PASS · Boot do PostgreSQL repete apenas falhas transitórias
+PASS · Arquivos internos do backend bloqueados no serviço web
+PASS · Caminhos PWA relativos compatíveis com subdiretório do GitHub Pages
 PASS · XP e recompensas somente pelo servidor
 PASS · Loja com transação, saldo protegido e compra duplicada bloqueada
 PASS · Circuito e cosmético Imortal protegidos por Prestígio 5 no servidor

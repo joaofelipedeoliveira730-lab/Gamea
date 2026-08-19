@@ -11,8 +11,9 @@ services:
         sync: false
       - key: JWT_SECRET
         generateValue: true
+      # Escolha você mesmo esta chave para conseguir usar a sala CEO.
       - key: CEO_ROOM_KEY
-        generateValue: true
+        sync: false
       # Opcional quando cliente e servidor usam este mesmo serviço.
       # Em frontend separado, informe a origem completa, sem caminho.
       - key: CLIENT_ORIGIN

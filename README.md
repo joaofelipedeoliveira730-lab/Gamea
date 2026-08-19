@@ -1,4 +1,4 @@
-# NEON PATH: PRESTIGE 12.0.1
+# NEON PATH: PRESTIGE 12.0.4
 
 Jogo de corrida arcade 3D multiplayer, feito para rodar inteiramente no navegador em computador e celular. O projeto mantém a estrutura plana da versão recebida e usa Node.js, Express, Socket.IO, Three.js e PostgreSQL.
 
@@ -30,9 +30,24 @@ NODE_ENV=production
 Em produção, `JWT_SECRET` precisa ter pelo menos 32 caracteres e `CEO_ROOM_KEY`, pelo menos 12. O servidor gera uma mensagem direta se uma dessas configurações estiver ausente ou inválida.
 Para PostgreSQL local sem TLS, acrescente `PGSSLMODE=disable`. Em hospedagem, a conexão segura é usada automaticamente.
 
-## Hotfix 12.0.1 para Render
+## Hotfix 12.0.4 para Render
 
-O boot agora migra tabelas antigas em etapas: primeiro cria ou acrescenta cada coluna e só depois cria os índices. Isso corrige o PostgreSQL `42703` (`undefined_column`) observado em bancos reutilizados, sem apagar tabelas, contas, ranking, loja ou progresso. Se outra incompatibilidade de esquema aparecer, o log informa a etapa exata no formato `[database migration: tabela.etapa]`.
+O boot migra tabelas antigas em etapas: primeiro cria ou acrescenta cada coluna e só depois cria os índices, corrigindo o PostgreSQL `42703` (`undefined_column`). Para eliminar definitivamente conflitos `23502` e `23514` de bancos reutilizados, a loja e o inventário agora usam tabelas exclusivas `neon_shop_items` e `neon_player_items`. As tabelas antigas permanecem intactas; compras compatíveis são importadas por código quando possível, mas uma incompatibilidade nelas nunca mais derruba o servidor. Cadastro e convidado também recebem proteção para campos antigos como `username` e `password`. Nenhuma conta ou progresso é apagado.
+
+
+## Correções 12.0.4
+
+- corrida preserva `userId`, IA dos rivais e cosméticos ao zerar a física na largada; XP, moedas, vitórias e histórico voltam a persistir corretamente;
+- reconexão de até 12 segundos durante uma corrida preserva a vaga e restaura a sessão automaticamente;
+- salas privadas e CEO completam o grid com rivais quando necessário, sem expor no snapshot se o participante é controlado pelo servidor;
+- `health` retorna erro quando o PostgreSQL configurado está indisponível e produção não inicia sem `DATABASE_URL`;
+- arquivos internos (`server.js`, `schema.sql`, testes, YAML e relatórios) deixam de ser servidos publicamente;
+- PWA e recursos usam caminhos relativos, funcionando em subdiretórios do GitHub Pages;
+- chamadas GET da API têm timeout e uma tentativa curta de recuperação para 502/503/504;
+- o boot repete somente falhas transitórias de conexão do PostgreSQL e falhas ao atualizar o perfil depois de um `COMMIT` não fazem o jogo dizer que o prêmio foi perdido;
+- uma indisponibilidade ao abrir a conexão da premiação não derruba a finalização da corrida.
+
+**Render em 2026:** bancos PostgreSQL gratuitos têm 1 GB e expiram após 30 dias. Para progresso permanente em produção, use um banco pago ou faça a migração antes da expiração.
 
 ## O que existe nesta versão
 
@@ -60,10 +75,21 @@ O navegador envia apenas intenção de controle. XP, moedas, PH, bônus diário,
 
 ## Implantação
 
-O `render.yaml` contém o serviço web. Configure `DATABASE_URL`, `JWT_SECRET` e `CEO_ROOM_KEY` no painel do Render. `CLIENT_ORIGIN` é opcional no mesmo serviço e recomendado quando o frontend está hospedado separadamente. Use:
+O `render.yaml` contém o serviço web. No Render, informe `DATABASE_URL` e escolha uma `CEO_ROOM_KEY` com pelo menos 12 caracteres; `JWT_SECRET` é gerado pelo Blueprint. Quando backend e PostgreSQL estiverem no Render e na mesma região, prefira a **Internal Database URL** como `DATABASE_URL`. `CLIENT_ORIGIN` é opcional no mesmo serviço e necessário quando o frontend está hospedado separadamente. Use:
 
 - Build: `npm install`
 - Start: `npm start`
+
+
+### GitHub Pages no frontend + Render no backend
+
+1. Envie os arquivos do projeto para a raiz do repositório e publique o GitHub Pages.
+2. Depois que o Web Service do Render existir, edite `config.js` e defina `window.NEON_API_BASE` com a URL HTTPS do backend Render. Não coloque barra no final.
+3. No Render, defina `CLIENT_ORIGIN` somente com a origem do GitHub Pages (por exemplo, `https://usuario.github.io`, sem `/nome-do-repositorio`).
+4. Em `DATABASE_URL`, use de preferência a URL **interna** do Render Postgres quando banco e backend estiverem na mesma conta/região.
+5. Após o deploy, abra `/health`. O esperado em produção é `ok: true` e `database: "ok"`.
+
+Se depois você hospedar frontend e backend juntos no mesmo Web Service do Render, deixe `config.js` vazio e o navegador usa o mesmo domínio automaticamente.
 - Health check: `/health`
 
 O Three.js está fixado na versão `0.178.0` pelo import map. Para uma instalação totalmente isolada de CDN, substitua o endereço do import map por uma cópia local da mesma versão.

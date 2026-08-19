@@ -36,7 +36,7 @@ const shellBytes=shell.reduce((sum,file)=>sum+fs.statSync(path.join(root,file)).
 assert(shellBytes<=450*1024,`shell inicial passou de 450 KiB: ${shellBytes}`);
 assert(sw.includes("request.headers.has('range')"),'service worker intercepta Range de vídeo');
 assert(sw.includes("/api/")&&sw.includes("/socket.io/"),'service worker pode cachear dados vivos');
-assert(sw.includes('neon-path-shell-v12')&&sw.includes('neon-path-resources-v12'),'versões de cache inconsistentes');
+assert(sw.includes("const CACHE_VERSION='v12-0-4'")&&sw.includes('neon-path-resources-v12'),'versões de cache inconsistentes');
 
 // PWA instalável e sem orientação forçada.
 assert.strictEqual(pwa.display,'fullscreen');
@@ -44,6 +44,9 @@ assert.strictEqual(pwa.orientation,'any');
 assert.strictEqual(pwa.lang,'pt-BR');
 assert(Array.isArray(pwa.icons)&&pwa.icons.length>0);
 assert(html.includes('rel="manifest" href="manifest.webmanifest"'));
+assert.strictEqual(pwa.start_url,'./','PWA ainda depende da raiz do domínio');
+assert.strictEqual(pwa.scope,'./','escopo PWA ainda depende da raiz do domínio');
+assert(!sw.includes("const SHELL=['/'"),'service worker ainda usa caminhos absolutos');
 
 function probe(file){
   const result=spawnSync('ffprobe',['-v','error','-show_entries','format=duration:stream=codec_name,width,height','-of','json',file],{cwd:root,encoding:'utf8'});
@@ -68,4 +71,4 @@ for(const ref of refs){
   const local=ref.replace(/^\//,'');assert(fs.existsSync(path.join(root,local)),`referência quebrada: ${ref}`);
 }
 
-console.log(`NEON PATH 12.0.1 QA VISUAL: PASS · shell ${(shellBytes/1024).toFixed(0)} KiB · essencial ${(liteBytes/1048576).toFixed(2)} MiB · MP4 ${Number(video.format.duration).toFixed(1)}s`);
+console.log(`NEON PATH 12.0.4 QA VISUAL: PASS · shell ${(shellBytes/1024).toFixed(0)} KiB · essencial ${(liteBytes/1048576).toFixed(2)} MiB · MP4 ${Number(video.format.duration).toFixed(1)}s`);

@@ -4,6 +4,7 @@ const assert=require('assert');
 const fs=require('fs');
 const crypto=require('crypto');
 const core=require('./game-core');
+const dbCompat=require('./db-compat');
 const server=fs.readFileSync(__dirname+'/server.js','utf8');
 const app=fs.readFileSync(__dirname+'/app.js','utf8');
 const schema=fs.readFileSync(__dirname+'/schema.sql','utf8');
@@ -53,7 +54,7 @@ assert(server.includes("CEO_ROOM_KEY com pelo menos 12 caracteres"));
 assert(!server.includes("const CEO_KEY = process.env.CEO_ROOM_KEY || 'Velho202026'"));
 const guestBlock=server.slice(server.indexOf("app.post('/api/auth/guest'"),server.indexOf("app.get('/api/rank'"));
 assert(!guestBlock.includes('SELECT id,nickname FROM users'),'convidado pode sequestrar conta por apelido');
-assert(guestBlock.includes('INSERT INTO users'),'convidado não recebe identidade isolada');
+assert(guestBlock.includes('buildUserInsert')&&guestBlock.includes('db.query(insert.sql,insert.values)'),'convidado não recebe identidade isolada');
 assert(server.includes('bcrypt.hash(password,12)')&&server.includes('bcrypt.compare'));
 assert(server.includes('authRateLimit')&&server.includes('reportRateLimit'));
 assert(server.includes('function normalizeAllowedOrigins'));
@@ -76,9 +77,22 @@ assert(server.includes("prestigeDrops"));
 assert(server.includes("prestigeCoinBonus"));
 assert(server.includes("io.to(p.id).emit('race:finish'"),'recompensa não é individualizada');
 assert(app.includes('x.rewards,x.profile'),'cliente não consome recompensa assinada pelo servidor');
+const startBlock=server.slice(server.indexOf('function start(r)'),server.indexOf('function finishPlayer'));
+for(const field of ['userId','bot','botSkill','cosmetics'])assert(startBlock.includes(field),`largada apaga ${field}`);
+assert(server.includes('DISCONNECT_GRACE_MS=12_000'),'reconexão de corrida sem janela de tolerância');
+assert(server.includes("s.emit('race:resume'"),'sessão não é retomada após reconexão');
+assert(app.includes('socket.on("race:resume"'),'cliente não restaura a corrida após reconexão');
+assert(server.includes('PRIVATE_WEB_FILES'),'arquivos internos continuam expostos pelo servidor estático');
 
 // Migrações são aditivas e mantêm a conexão PostgreSQL existente.
-assert(server.includes('new Pool({ connectionString: process.env.DATABASE_URL'));
+assert(server.includes('connectionString: process.env.DATABASE_URL'));
+assert(server.includes("DATABASE_URL é obrigatório em produção"),'produção pode subir sem banco');
+assert(server.includes("pool.on('error'"),'erro de cliente ocioso do pg pode derrubar o processo');
+assert(server.includes("app.set('trust proxy', 1)"),'rate limit não respeita proxy do Render');
+assert(server.includes("client=await db.connect()"),'premiação não protege falha ao adquirir conexão');
+assert(server.includes("race profile refresh:"),'falha pós-COMMIT pode marcar prêmio como perdido');
+assert(server.includes('initDatabaseResilient'),'boot não tenta recuperar conexão transitória com PostgreSQL');
+assert(server.includes('transientDatabaseError'),'boot repete inclusive erros permanentes de migração');
 assert(server.includes('async function ensureColumns'));
 assert(server.includes("'lifetime_xp BIGINT NOT NULL DEFAULT 0'"));
 assert(server.includes("'daily_races INTEGER NOT NULL DEFAULT 0'"));
@@ -87,11 +101,29 @@ assert(server.indexOf("await ensureColumns('player_profiles'")<server.indexOf("m
 assert(server.indexOf("await ensureColumns('race_results'")<server.indexOf("migrationStep('race_results.user-created-index'"),'índice de corrida é criado antes das colunas');
 assert(server.indexOf("await ensureColumns('bug_reports'")<server.indexOf("migrationStep('bug_reports.open-index'"),'índice de bugs é criado antes das colunas');
 assert(server.indexOf("await ensureColumns('users'")<server.indexOf("migrationStep('users.ph-index'"),'índice de usuários é criado antes das colunas');
-assert(server.indexOf("await ensureColumns('shop_items'")<server.indexOf("migrationStep('shop_items.code-index'"),'índice da loja é criado antes das colunas');
 assert(server.indexOf("await ensureColumns('player_characters'")<server.indexOf("migrationStep('player_characters.user-character-index'"),'índice de personagens é criado antes das colunas');
-assert(server.indexOf("await ensureColumns('player_items'")<server.indexOf("migrationStep('player_items.user-item-index'"),'índice do inventário é criado antes das colunas');
 assert(!/\b(?:DROP|TRUNCATE)\s+TABLE\b/i.test(server),'migração destrutiva no boot');
-for(const table of ['users','race_results','player_profiles','player_characters','shop_items','player_items','bug_reports'])assert(schema.includes(`CREATE TABLE IF NOT EXISTS ${table}`),`tabela ausente: ${table}`);
+for(const table of ['users','race_results','player_profiles','player_characters','neon_shop_items','neon_player_items','bug_reports'])assert(schema.includes(`CREATE TABLE IF NOT EXISTS ${table}`),`tabela ausente: ${table}`);
+assert(server.includes('CREATE TABLE IF NOT EXISTS neon_shop_items'),'loja isolada não é criada');
+assert(server.includes('CREATE TABLE IF NOT EXISTS neon_player_items'),'inventário isolado não é criado');
+assert(server.includes('INSERT INTO neon_shop_items(code,name,description,type,price,rarity,data,enabled)'),'catálogo ainda usa tabela legada');
+assert(!/INSERT INTO shop_items\s*\(/.test(server),'boot ainda escreve na loja legada incompatível');
+assert(server.includes('async function migrateLegacyInventory'));
+assert(server.includes('inventário legado mantido intacto'),'falha opcional no inventário legado derruba o boot');
+
+const legacyUser=[
+  {column_name:'nickname',data_type:'character varying',udt_name:'varchar',character_maximum_length:20},
+  {column_name:'email',data_type:'character varying',udt_name:'varchar',character_maximum_length:160},
+  {column_name:'username',data_type:'character varying',udt_name:'varchar',character_maximum_length:20},
+  {column_name:'password',data_type:'text',udt_name:'text'},
+  {column_name:'is_admin',data_type:'boolean',udt_name:'bool'}
+];
+const userInsert=dbCompat.buildUserInsert({nickname:'Piloto_X1',email:null,passwordHash:'bcrypt-hash'},legacyUser);
+assert(userInsert.sql.includes('"username"')&&userInsert.sql.includes('"password"'));
+assert(userInsert.values.every(value=>value!==null&&value!==undefined),'usuário legado NOT NULL recebeu valor nulo');
+assert(String(userInsert.values[1]).endsWith('@guest.neon-path.invalid'));
+assert.strictEqual(userInsert.values[3],'Piloto_X1');
+assert.strictEqual(userInsert.values[4],'bcrypt-hash');
 
 // Loja e ranking consistentes.
 assert(server.includes('bruto_coins=bruto_coins-$1'));
@@ -108,4 +140,4 @@ for(let i=0;i<80_000;i++){
   assert(reward.ph>=-7&&reward.ph<=38);
 }
 
-console.log('NEON PATH 12.0.1 SEGURANÇA: PASS · 10.000 payloads hostis · 80.000 recompensas · banco aditivo');
+console.log('NEON PATH 12.0.4 SEGURANÇA: PASS · 10.000 payloads hostis · 80.000 recompensas · banco aditivo');

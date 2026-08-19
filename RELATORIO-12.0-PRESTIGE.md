@@ -1,4 +1,4 @@
-# Relatório de entrega — NEON PATH: PRESTIGE 12.0.1
+# Relatório de entrega — NEON PATH: PRESTIGE 12.0.4
 
 ## Resultado
 
@@ -16,6 +16,13 @@ A versão recebida foi reciclada em uma edição nova, mantendo a conexão Postg
 - Adicionados limite de requisições, segredo obrigatório em produção e expiração segura de sessão.
 - Corrigido o boot no Render com PostgreSQL antigo: migrações agora garantem todas as colunas antes de criar índices, eliminando o erro `42703` sem apagar dados.
 - Tornado `CLIENT_ORIGIN` opcional no mesmo serviço e normalizado para aceitar com segurança URLs com ou sem barra final.
+- Adicionada compatibilidade automática com colunas `NOT NULL` desconhecidas de lojas antigas, corrigindo o PostgreSQL `23502` durante a carga do catálogo.
+- Isoladas a loja e o inventário em `neon_shop_items`/`neon_player_items`, eliminando regras `CHECK` (`23514`) herdadas de outros projetos sem remover as tabelas antigas.
+- Corrigida a largada que apagava `userId`, estado de IA e cosméticos; isso podia impedir a persistência de XP/moedas/vitórias e descaracterizar rivais.
+- Adicionada janela de reconexão de 12 segundos, com retomada da corrida e restauração do estado no cliente.
+- Corrigida a premiação para que falha ao adquirir conexão PostgreSQL não interrompa `finishRace`, e para que falha pós-`COMMIT` ao atualizar o perfil não seja tratada como prêmio perdido.
+- Adicionada nova tentativa apenas para falhas transitórias do PostgreSQL durante o boot.
+- Bloqueado o acesso HTTP aos arquivos internos do backend e convertidos os caminhos do PWA para relativos, permitindo frontend em subdiretório do GitHub Pages.
 
 ## Conteúdo e experiência
 

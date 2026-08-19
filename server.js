@@ -11,11 +11,15 @@ const cors = require('cors');
 const { Pool } = require('pg');
 const { Server } = require('socket.io');
 const core = require('./game-core');
+const dbCompat = require('./db-compat');
 
 const app = express();
 const server = http.createServer(app);
 const PORT = Number(process.env.PORT || 3000);
 const IS_PRODUCTION = process.env.NODE_ENV === 'production';
+if (IS_PRODUCTION && !process.env.DATABASE_URL) {
+  throw new Error('DATABASE_URL é obrigatório em produção. Conecte um Render Postgres antes de iniciar o serviço.');
+}
 if (IS_PRODUCTION && (!process.env.JWT_SECRET || process.env.JWT_SECRET.length < 32)) {
   throw new Error('JWT_SECRET com pelo menos 32 caracteres é obrigatório em produção.');
 }
@@ -27,9 +31,20 @@ const CEO_KEY = process.env.CEO_ROOM_KEY || 'dev-ceo-key-change-me';
 const databaseSsl = process.env.PGSSLMODE==='disable'||/\b(?:localhost|127\.0\.0\.1)\b/i.test(process.env.DATABASE_URL||'')
   ? false : { rejectUnauthorized: process.env.PGSSL_REJECT_UNAUTHORIZED==='true' };
 const pool = process.env.DATABASE_URL
-  ? new Pool({ connectionString: process.env.DATABASE_URL, ssl: databaseSsl, max: 5, idleTimeoutMillis:30_000,connectionTimeoutMillis:8_000 })
+  ? new Pool({
+      connectionString: process.env.DATABASE_URL,
+      ssl: databaseSsl,
+      max: 5,
+      idleTimeoutMillis:30_000,
+      connectionTimeoutMillis:8_000,
+      statement_timeout:10_000,
+      query_timeout:12_000,
+      keepAlive:true
+    })
   : null;
+if (pool) pool.on('error',error=>console.error('NEON PATH PostgreSQL idle client error:',error.message));
 const db = pool;
+let requiredUserInsertColumns=[];
 
 function normalizeAllowedOrigins(value) {
   const raw=String(value||'').split(',').map(v=>v.trim()).filter(Boolean);
@@ -46,10 +61,19 @@ function normalizeAllowedOrigins(value) {
 }
 const allowedOrigins = normalizeAllowedOrigins(process.env.CLIENT_ORIGIN);
 const corsOrigin = allowedOrigins.includes('*') ? '*' : (origin, callback) => callback(null, !origin || allowedOrigins.includes(origin));
+app.set('trust proxy', 1);
 app.use(helmet({ contentSecurityPolicy: false, crossOriginResourcePolicy:{policy:'cross-origin'} }));
 app.use(cors({ origin: corsOrigin, credentials: allowedOrigins[0] !== '*' }));
 app.use(express.json({ limit: '32kb' }));
-app.use(express.static(__dirname));
+// O projeto é plano para facilitar o GitHub, mas o backend não deve virar arquivo público.
+const PRIVATE_WEB_FILES=new Set(['server.js','game-core.js','db-compat.js','package.json','package-lock.json','schema.sql','render.yaml','README.md','QA-12.0.txt','RELATORIO-12.0-PRESTIGE.md','test.js','test-qa.js','test-room.js']);
+app.use((req,res,next)=>{
+  if(req.method!=='GET'&&req.method!=='HEAD')return next();
+  const name=path.basename(req.path||'');
+  if(name.startsWith('.')||PRIVATE_WEB_FILES.has(name)||/^test(?:-|\.)/i.test(name)||/\.(?:sql|ya?ml|md|txt)$/i.test(name))return res.status(404).end();
+  next();
+});
+app.use(express.static(__dirname,{dotfiles:'deny',etag:true,maxAge:IS_PRODUCTION?'1h':0,index:'index.html'}));
 
 function createRateLimit(windowMs, max) {
   const hits = new Map();
@@ -108,6 +132,19 @@ async function ensureColumns(table, definitions) {
   }
 }
 
+async function requiredInsertColumns(table) {
+  if(!/^[a-z_]+$/.test(table))throw new Error('invalid compatibility table');
+  return (await db.query(`
+    SELECT c.column_name,c.data_type,c.udt_name,c.character_maximum_length,
+      (SELECT e.enumlabel FROM pg_type t JOIN pg_enum e ON e.enumtypid=t.oid
+       WHERE t.typname=c.udt_name ORDER BY e.enumsortorder LIMIT 1) AS enum_label
+    FROM information_schema.columns c
+    WHERE c.table_schema='public' AND c.table_name=$1
+      AND c.is_nullable='NO' AND c.column_default IS NULL
+      AND COALESCE(c.is_identity,'NO')='NO' AND COALESCE(c.is_generated,'NEVER')='NEVER'
+    ORDER BY c.ordinal_position`,[table])).rows;
+}
+
 async function initDatabase() {
   if (!db) return;
 
@@ -120,6 +157,7 @@ async function initDatabase() {
     'races INTEGER NOT NULL DEFAULT 0','bruto_coins INTEGER NOT NULL DEFAULT 15000',
     "role VARCHAR(24) NOT NULL DEFAULT 'player'",'last_seen_at TIMESTAMPTZ','created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()'
   ]);
+  requiredUserInsertColumns=await requiredInsertColumns('users');
   await migrationStep('users.id-index',()=>db.query('CREATE UNIQUE INDEX IF NOT EXISTS uq_users_id ON users(id)'));
 
   const userCols=await tableColumns('users');
@@ -164,18 +202,18 @@ async function initDatabase() {
   await ensureColumns('player_characters',['user_id BIGINT','character_id INTEGER','unlocked BOOLEAN NOT NULL DEFAULT FALSE','selected BOOLEAN NOT NULL DEFAULT FALSE']);
   await migrationStep('player_characters.user-character-index',()=>db.query('CREATE UNIQUE INDEX IF NOT EXISTS uq_player_characters_user_character ON player_characters(user_id,character_id)'));
 
-  await migrationStep('shop_items.create',()=>db.query(`CREATE TABLE IF NOT EXISTS shop_items (id SERIAL PRIMARY KEY)`));
-  await ensureColumns('shop_items',[
-    'id SERIAL','code VARCHAR(64)','name VARCHAR(120)','description VARCHAR(220)','type VARCHAR(32)',
-    'price INTEGER NOT NULL DEFAULT 0',"rarity VARCHAR(24) NOT NULL DEFAULT 'common'","data JSONB NOT NULL DEFAULT '{}'::jsonb",'enabled BOOLEAN NOT NULL DEFAULT TRUE'
-  ]);
-  await migrationStep('shop_items.fill-legacy',()=>db.query(`UPDATE shop_items SET code=COALESCE(NULLIF(code,''),'legacy_'||id::text),name=COALESCE(NULLIF(name,''),'Item legado'),type=COALESCE(NULLIF(type,''),'cosmetic')`));
-  await migrationStep('shop_items.id-index',()=>db.query('CREATE UNIQUE INDEX IF NOT EXISTS uq_shop_items_id ON shop_items(id)'));
-  await migrationStep('shop_items.code-index',()=>db.query('CREATE UNIQUE INDEX IF NOT EXISTS uq_shop_items_code ON shop_items(code)'));
-
-  await migrationStep('player_items.create',()=>db.query(`CREATE TABLE IF NOT EXISTS player_items (user_id BIGINT NOT NULL,item_id INTEGER NOT NULL,owned BOOLEAN NOT NULL DEFAULT TRUE,equipped BOOLEAN NOT NULL DEFAULT FALSE,PRIMARY KEY(user_id,item_id))`));
-  await ensureColumns('player_items',['user_id BIGINT','item_id INTEGER','owned BOOLEAN NOT NULL DEFAULT TRUE','equipped BOOLEAN NOT NULL DEFAULT FALSE']);
-  await migrationStep('player_items.user-item-index',()=>db.query('CREATE UNIQUE INDEX IF NOT EXISTS uq_player_items_user_item ON player_items(user_id,item_id)'));
+  // A loja usa nomes exclusivos do NEON PATH. Bancos reutilizados podem possuir
+  // shop_items/player_items de outros projetos com CHECKs incompatíveis.
+  await migrationStep('neon_shop_items.create',()=>db.query(`CREATE TABLE IF NOT EXISTS neon_shop_items (
+    id SERIAL PRIMARY KEY,code VARCHAR(64) UNIQUE NOT NULL,name VARCHAR(120) NOT NULL,description VARCHAR(220),
+    type VARCHAR(32) NOT NULL,price INTEGER NOT NULL DEFAULT 0 CHECK(price>=0),
+    rarity VARCHAR(24) NOT NULL DEFAULT 'common',data JSONB NOT NULL DEFAULT '{}'::jsonb,enabled BOOLEAN NOT NULL DEFAULT TRUE
+  )`));
+  await migrationStep('neon_player_items.create',()=>db.query(`CREATE TABLE IF NOT EXISTS neon_player_items (
+    user_id BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    item_id INTEGER NOT NULL REFERENCES neon_shop_items(id) ON DELETE CASCADE,
+    owned BOOLEAN NOT NULL DEFAULT TRUE,equipped BOOLEAN NOT NULL DEFAULT FALSE,PRIMARY KEY(user_id,item_id)
+  )`));
 
   await migrationStep('bug_reports.create',()=>db.query(`CREATE TABLE IF NOT EXISTS bug_reports (id BIGSERIAL PRIMARY KEY)`));
   await ensureColumns('bug_reports',[
@@ -186,6 +224,7 @@ async function initDatabase() {
   await migrationStep('bug_reports.open-index',()=>db.query('CREATE INDEX IF NOT EXISTS idx_bug_reports_open ON bug_reports(resolved,created_at DESC)'));
 
   await migrationStep('store.seed',ensureStore);
+  await migrateLegacyInventory();
 }
 
 async function getProfile(userId, queryable=db) {
@@ -205,10 +244,10 @@ async function getProfile(userId, queryable=db) {
     FROM player_profiles p JOIN users u ON u.id=p.user_id
     WHERE p.user_id=$1`, [userId])).rows[0];
   const chars = (await queryable.query(`SELECT character_id,unlocked,selected FROM player_characters WHERE user_id=$1 ORDER BY character_id`, [userId])).rows;
-  await queryable.query(`INSERT INTO player_items(user_id,item_id)
-    SELECT $1,id FROM shop_items WHERE enabled=TRUE AND price=0 ON CONFLICT DO NOTHING`,[userId]);
-  await queryable.query(`INSERT INTO player_items(user_id,item_id)
-    SELECT $1,id FROM shop_items WHERE code IN ('prestige_spark','prestige_phantom','prestige_crown','immortal_protocol')
+  await queryable.query(`INSERT INTO neon_player_items(user_id,item_id)
+    SELECT $1,id FROM neon_shop_items WHERE enabled=TRUE AND price=0 ON CONFLICT DO NOTHING`,[userId]);
+  await queryable.query(`INSERT INTO neon_player_items(user_id,item_id)
+    SELECT $1,id FROM neon_shop_items WHERE code IN ('prestige_spark','prestige_phantom','prestige_crown','immortal_protocol')
     AND COALESCE((data->>'prestige')::integer,99) <= $2 ON CONFLICT DO NOTHING`,[userId,Math.max(0,Math.min(5,Number(p.prestige)||0))]);
   return { ...p, xp_needed:core.xpForLevel(p.level), characters: chars };
 }
@@ -236,17 +275,35 @@ const STORE_CATALOG = [
 async function ensureStore() {
   if (!db) return;
   for (const it of STORE_CATALOG) {
-    await db.query(`INSERT INTO shop_items(code,name,description,type,price,rarity,data,enabled) VALUES($1,$2,$3,$4,$5,$6,$7,$8)
-      ON CONFLICT(code) DO UPDATE SET name=EXCLUDED.name,description=EXCLUDED.description,type=EXCLUDED.type,price=EXCLUDED.price,rarity=EXCLUDED.rarity,data=EXCLUDED.data,enabled=EXCLUDED.enabled`,
+    await db.query(`INSERT INTO neon_shop_items(code,name,description,type,price,rarity,data,enabled) VALUES($1,$2,$3,$4,$5,$6,$7,$8)
+      ON CONFLICT(code) DO UPDATE SET name=EXCLUDED.name,description=EXCLUDED.description,type=EXCLUDED.type,
+      price=EXCLUDED.price,rarity=EXCLUDED.rarity,data=EXCLUDED.data,enabled=EXCLUDED.enabled`,
       [it.code,it.name,it.description,it.type,it.price,it.rarity,it.data,it.enabled!==false]);
   }
 }
 
+async function migrateLegacyInventory() {
+  try {
+    const oldShop=await tableColumns('shop_items'),oldInventory=await tableColumns('player_items');
+    if(!['id','code'].every(column=>oldShop.has(column))||!['user_id','item_id'].every(column=>oldInventory.has(column)))return;
+    const owned=oldInventory.has('owned')?'COALESCE(p.owned,TRUE)':'TRUE';
+    const equipped=oldInventory.has('equipped')?'COALESCE(p.equipped,FALSE)':'FALSE';
+    await db.query(`INSERT INTO neon_player_items(user_id,item_id,owned,equipped)
+      SELECT p.user_id,n.id,${owned},${equipped} FROM player_items p
+      JOIN shop_items old ON old.id=p.item_id JOIN neon_shop_items n ON n.code=old.code
+      WHERE p.user_id IS NOT NULL ON CONFLICT(user_id,item_id) DO UPDATE
+      SET owned=neon_player_items.owned OR EXCLUDED.owned,equipped=neon_player_items.equipped OR EXCLUDED.equipped`);
+  } catch(error) {
+    console.warn('NEON PATH database: inventário legado mantido intacto; importação opcional ignorada:',error.code||error.message);
+  }
+}
+
 app.get('/health', async (_req, res) => {
-  let database = 'disabled';
+  let database = db ? 'checking' : 'disabled';
   try { if (db) { await db.query('SELECT 1'); database = 'ok'; } }
-  catch { database = 'error'; }
-  res.json({ ok:true, service:'NEON PATH', database, version:'12.0.1', realtime:'authoritative-30hz' });
+  catch (error) { database = 'error'; console.error('health database:',error.message); }
+  const ok = !IS_PRODUCTION || database === 'ok';
+  res.status(ok?200:503).json({ ok, service:'NEON PATH', database, version:'12.0.4', realtime:'authoritative-30hz' });
 });
 
 app.post('/api/bug-report', reportRateLimit, async(req,res)=>{
@@ -273,7 +330,8 @@ app.post('/api/auth/register', authRateLimit, async (req,res) => {
   if (!validPassword(password)) return res.status(400).json({error:'senha deve ter pelo menos 8 caracteres'});
   try {
     const hash=await bcrypt.hash(password,12);
-    const q=await db.query(`INSERT INTO users(nickname,email,password_hash) VALUES($1,$2,$3) RETURNING id,nickname`,[nickname,email || null,hash]);
+    const insert=dbCompat.buildUserInsert({nickname,email:email||null,passwordHash:hash},requiredUserInsertColumns);
+    const q=await db.query(insert.sql,insert.values);
     const user=q.rows[0];
     await getProfile(user.id);
     res.json({token:signUser(user),nickname:user.nickname});
@@ -305,7 +363,8 @@ app.post('/api/auth/guest', authRateLimit, async (req,res) => {
     const suffix='_'+crypto.randomBytes(2).toString('hex').toUpperCase();
     const guestName=(nickname.slice(0,20-suffix.length)+suffix);
     const h=await bcrypt.hash(crypto.randomBytes(18).toString('hex'),10);
-    const q=await db.query('INSERT INTO users(nickname,password_hash) VALUES($1,$2) RETURNING id,nickname',[guestName,h]);
+    const insert=dbCompat.buildUserInsert({nickname:guestName,email:null,passwordHash:h},requiredUserInsertColumns);
+    const q=await db.query(insert.sql,insert.values);
     const user=q.rows[0];
     await getProfile(user.id); res.json({token:signUser(user),nickname:user.nickname});
   } catch(e){console.error('guest:',e);res.status(500).json({error:'banco'});}
@@ -341,14 +400,14 @@ app.post('/api/profile/xp', async(req,res)=>{
   res.status(403).json({error:'server_awards_only'});
 });
 
-app.get('/api/shop',async(_req,res)=>{if(!db)return res.status(503).json({error:'database_unavailable'});try{const r=await db.query('SELECT id,code,name,description,type,price,rarity,data FROM shop_items WHERE enabled=true ORDER BY price,id');res.json(r.rows);}catch(e){res.status(500).json({error:'shop_error'});}});
-app.get('/api/inventory',async(req,res)=>{const u=authUser(req);if(!u?.id)return res.status(401).json({error:'unauthorized'});if(!db)return res.status(503).json({error:'database_unavailable'});try{const r=await db.query(`SELECT s.id,s.code,s.name,s.description,s.type,s.price,s.rarity,s.data,p.equipped FROM player_items p JOIN shop_items s ON s.id=p.item_id WHERE p.user_id=$1 AND p.owned=true ORDER BY s.type,s.id`,[u.id]);res.json(r.rows);}catch(e){res.status(500).json({error:'inventory_error'});}});
+app.get('/api/shop',async(_req,res)=>{if(!db)return res.status(503).json({error:'database_unavailable'});try{const r=await db.query('SELECT id,code,name,description,type,price,rarity,data FROM neon_shop_items WHERE enabled=true ORDER BY price,id');res.json(r.rows);}catch(e){res.status(500).json({error:'shop_error'});}});
+app.get('/api/inventory',async(req,res)=>{const u=authUser(req);if(!u?.id)return res.status(401).json({error:'unauthorized'});if(!db)return res.status(503).json({error:'database_unavailable'});try{const r=await db.query(`SELECT s.id,s.code,s.name,s.description,s.type,s.price,s.rarity,s.data,p.equipped FROM neon_player_items p JOIN neon_shop_items s ON s.id=p.item_id WHERE p.user_id=$1 AND p.owned=true ORDER BY s.type,s.id`,[u.id]);res.json(r.rows);}catch(e){res.status(500).json({error:'inventory_error'});}});
 app.post('/api/shop/buy',async(req,res)=>{
   const u=authUser(req);if(!u?.id)return res.status(401).json({error:'unauthorized'});if(!db)return res.status(503).json({error:'database_unavailable'});const code=String(req.body?.code||'').slice(0,64);const client=await db.connect();
-  try{await client.query('BEGIN');const item=(await client.query('SELECT * FROM shop_items WHERE code=$1 AND enabled=true FOR UPDATE',[code])).rows[0];if(!item){await client.query('ROLLBACK');return res.status(404).json({error:'item_not_found'});}const owned=(await client.query('SELECT 1 FROM player_items WHERE user_id=$1 AND item_id=$2',[u.id,item.id])).rowCount;if(owned){await client.query('ROLLBACK');return res.status(409).json({error:'already_owned'});}if(Number(item.price)>0){const q=await client.query('UPDATE users SET bruto_coins=bruto_coins-$1 WHERE id=$2 AND bruto_coins >= $1 RETURNING bruto_coins',[item.price,u.id]);if(!q.rowCount){await client.query('ROLLBACK');return res.status(400).json({error:'insufficient_coins'});}}await client.query('INSERT INTO player_items(user_id,item_id) VALUES($1,$2)',[u.id,item.id]);await client.query('COMMIT');res.json({ok:true,item,profile:await getProfile(u.id)});}
+  try{await client.query('BEGIN');const item=(await client.query('SELECT * FROM neon_shop_items WHERE code=$1 AND enabled=true FOR UPDATE',[code])).rows[0];if(!item){await client.query('ROLLBACK');return res.status(404).json({error:'item_not_found'});}const owned=(await client.query('SELECT 1 FROM neon_player_items WHERE user_id=$1 AND item_id=$2',[u.id,item.id])).rowCount;if(owned){await client.query('ROLLBACK');return res.status(409).json({error:'already_owned'});}if(Number(item.price)>0){const q=await client.query('UPDATE users SET bruto_coins=bruto_coins-$1 WHERE id=$2 AND bruto_coins >= $1 RETURNING bruto_coins',[item.price,u.id]);if(!q.rowCount){await client.query('ROLLBACK');return res.status(400).json({error:'insufficient_coins'});}}await client.query('INSERT INTO neon_player_items(user_id,item_id) VALUES($1,$2)',[u.id,item.id]);await client.query('COMMIT');res.json({ok:true,item,profile:await getProfile(u.id)});}
   catch(e){await client.query('ROLLBACK').catch(()=>{});console.error('buy:',e);res.status(500).json({error:'purchase_error'});}finally{client.release();}
 });
-app.post('/api/inventory/equip',async(req,res)=>{const u=authUser(req);if(!u?.id)return res.status(401).json({error:'unauthorized'});if(!db)return res.status(503).json({error:'database_unavailable'});const code=String(req.body?.code||'').slice(0,64);try{const item=(await db.query('SELECT * FROM shop_items WHERE code=$1',[code])).rows[0];if(!item)return res.status(404).json({error:'item_not_found'});const owned=(await db.query('SELECT 1 FROM player_items WHERE user_id=$1 AND item_id=$2 AND owned=true',[u.id,item.id])).rowCount;if(!owned)return res.status(403).json({error:'not_owned'});await db.query('UPDATE player_items p SET equipped=false FROM shop_items s WHERE p.item_id=s.id AND p.user_id=$1 AND s.type=$2',[u.id,item.type]);await db.query('UPDATE player_items SET equipped=true WHERE user_id=$1 AND item_id=$2',[u.id,item.id]);res.json({ok:true});}catch(e){res.status(500).json({error:'equip_error'});}});
+app.post('/api/inventory/equip',async(req,res)=>{const u=authUser(req);if(!u?.id)return res.status(401).json({error:'unauthorized'});if(!db)return res.status(503).json({error:'database_unavailable'});const code=String(req.body?.code||'').slice(0,64);try{const item=(await db.query('SELECT * FROM neon_shop_items WHERE code=$1',[code])).rows[0];if(!item)return res.status(404).json({error:'item_not_found'});const owned=(await db.query('SELECT 1 FROM neon_player_items WHERE user_id=$1 AND item_id=$2 AND owned=true',[u.id,item.id])).rowCount;if(!owned)return res.status(403).json({error:'not_owned'});await db.query('UPDATE neon_player_items p SET equipped=false FROM neon_shop_items s WHERE p.item_id=s.id AND p.user_id=$1 AND s.type=$2',[u.id,item.type]);await db.query('UPDATE neon_player_items SET equipped=true WHERE user_id=$1 AND item_id=$2',[u.id,item.id]);res.json({ok:true});}catch(e){res.status(500).json({error:'equip_error'});}});
 
 // ===== Multiplayer — NEON PATH RACING 12.0 =====
 const io=new Server(server,{cors:{origin:corsOrigin,credentials:allowedOrigins[0]!=='*'},pingTimeout:20_000,pingInterval:10_000,maxHttpBufferSize:32_000});
@@ -416,7 +475,16 @@ function start(r){
   clearTimeout(r.startTimer);clearTimeout(r.maxRaceTimer);
   r.running=true;r.finishing=false;r.started=Date.now();r.finishOrder=[];r.countdownUntil=Date.now()+3600;
   let i=0;
-  for(const p of r.players.values()){const characterId=p.characterId||((i)%8)+1;Object.assign(p,spawn(i++),{id:p.id,nickname:p.nickname,color:p.color,characterId});}
+  // Reinicia apenas a física. Identidade, autenticação, IA e cosméticos precisam sobreviver.
+  for(const p of r.players.values()){
+    const persistent={
+      id:p.id,userId:p.userId||null,nickname:p.nickname,color:p.color,characterId:p.characterId||((i)%8)+1,
+      bot:!!p.bot,botSkill:Number(p.botSkill)||1,cosmetics:Array.isArray(p.cosmetics)?p.cosmetics:[],
+      disconnectedAt:Number(p.disconnectedAt)||0,disconnectTimer:p.disconnectTimer||null,ceo:!!p.ceo
+    };
+    Object.assign(p,spawn(i++),persistent);
+    if(p.disconnectedAt){p.throttle=false;p.brake=true;p.steer=0;}
+  }
   io.to(r.code).emit('race:loading',{track:r.track});
   [3,2,1].forEach((v,i)=>setTimeout(()=>io.to(r.code).emit('race:countdown',{value:v}),i*1000));
   setTimeout(()=>io.to(r.code).emit('race:countdown',{value:'GO'}),3000);
@@ -433,34 +501,40 @@ function finishPlayer(p,r){
 async function awardRace(r,p,position){
   const reward=core.calculateRaceRewards(position,r.mode,p.kills);
   if(!db||!p.userId)return{rewards:{...reward,prestigeUp:false,persisted:false},profile:null};
-  const client=await db.connect();
+  let client=null, advanced=null, dailyBonus=0, prestigeCoinBonus=0, totalCoins=reward.coins;
   try{
+    client=await db.connect();
     await client.query('BEGIN');
     await client.query('INSERT INTO player_profiles(user_id) VALUES($1) ON CONFLICT DO NOTHING',[p.userId]);
     const old=(await client.query('SELECT level,xp,lifetime_xp,prestige FROM player_profiles WHERE user_id=$1 FOR UPDATE',[p.userId])).rows[0];
-    const advanced=core.advanceProfile(old,reward.xp);
+    advanced=core.advanceProfile(old,reward.xp);
     const daily=(await client.query(`UPDATE player_profiles SET
       level=$2,xp=$3,lifetime_xp=$4,prestige=$5,total_wins=total_wins+$6,total_races=total_races+1,
       ph=GREATEST(0,ph+$7),daily_races=CASE WHEN daily_races_date=CURRENT_DATE THEN daily_races+1 ELSE 1 END,
       daily_races_date=CURRENT_DATE,updated_at=NOW() WHERE user_id=$1 RETURNING daily_races`,
       [p.userId,advanced.level,advanced.xp,advanced.lifetime_xp,advanced.prestige,position===1?1:0,reward.ph])).rows[0];
-    const dailyBonus=Number(daily?.daily_races)===3?450:0;
-    const prestigeCoinBonus=Number(old.prestige)<2&&advanced.prestige>=2?1500:0;
-    const totalCoins=reward.coins+dailyBonus+prestigeCoinBonus;
+    dailyBonus=Number(daily?.daily_races)===3?450:0;
+    prestigeCoinBonus=Number(old.prestige)<2&&advanced.prestige>=2?1500:0;
+    totalCoins=reward.coins+dailyBonus+prestigeCoinBonus;
     const prestigeDrops=[[1,'prestige_spark'],[3,'prestige_phantom'],[4,'prestige_crown'],[5,'immortal_protocol']];
     for(const [required,code] of prestigeDrops)if(Number(old.prestige)<required&&advanced.prestige>=required){
-      await client.query(`INSERT INTO player_items(user_id,item_id) SELECT $1,id FROM shop_items WHERE code=$2 ON CONFLICT DO NOTHING`,[p.userId,code]);
+      await client.query(`INSERT INTO neon_player_items(user_id,item_id) SELECT $1,id FROM neon_shop_items WHERE code=$2 ON CONFLICT DO NOTHING`,[p.userId,code]);
     }
     await client.query(`UPDATE users SET wins=wins+$2,kills=kills+$3,races=races+1,ph=GREATEST(0,ph+$4),bruto_coins=bruto_coins+$5,last_seen_at=NOW() WHERE id=$1`,
       [p.userId,position===1?1:0,Math.max(0,Number(p.kills)||0),reward.ph,totalCoins]);
     await client.query(`INSERT INTO race_results(user_id,nickname,position,kills,ph_delta,map,xp_earned,coins_earned,duration_ms,mode,character_id)
       VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)`,[p.userId,p.nickname,position,p.kills||0,reward.ph,r.track,reward.xp,totalCoins,Math.max(0,Date.now()-r.started),r.mode,p.characterId||1]);
     await client.query('COMMIT');
-    return{rewards:{...reward,coins:totalCoins,dailyBonus,prestigeCoinBonus,prestigeUp:advanced.prestigeUp,persisted:true},profile:await getProfile(p.userId)};
   }catch(error){
-    await client.query('ROLLBACK').catch(()=>{});console.error('race reward:',error);
+    if(client)await client.query('ROLLBACK').catch(()=>{});
+    console.error('race reward:',error);
     return{rewards:{...reward,prestigeUp:false,persisted:false},profile:null};
-  }finally{client.release();}
+  }finally{client?.release();}
+  // O prêmio já foi confirmado no banco. Uma falha ao recarregar o perfil não pode
+  // transformar um COMMIT bem-sucedido em "não salvo" nem quebrar o fim da corrida.
+  let profile=null;
+  try{profile=await getProfile(p.userId);}catch(error){console.warn('race profile refresh:',error.message);}
+  return{rewards:{...reward,coins:totalCoins,dailyBonus,prestigeCoinBonus,prestigeUp:!!advanced?.prestigeUp,persisted:true},profile};
 }
 async function finishRace(r){
   if(!r.running||r.finishing)return;
@@ -473,11 +547,10 @@ async function finishRace(r){
   }));
   r.finishing=false;r.finishedAt=Date.now();
 }
-function detachSocket(s){
-  const r=rooms.get(s.data.room);
-  if(!r)return;
-  r.players.delete(s.id);s.leave(r.code);
-  if(r.ownerId===s.id){
+function removePlayerFromRoom(r,playerId){
+  if(!r||!r.players.has(playerId))return;
+  const player=r.players.get(playerId);clearTimeout(player?.disconnectTimer);r.players.delete(playerId);
+  if(r.ownerId===playerId){
     const next=[...r.players.values()].find(p=>!p.bot);r.ownerId=next?.id||null;
     for(const [sid] of r.players){const sock=io.sockets.sockets.get(sid);if(sock)sock.data.roomOwner=sid===r.ownerId;}
   }
@@ -486,7 +559,43 @@ function detachSocket(s){
     io.to(r.code).emit('state',snap(r));
     if(r.running&&[...r.players.values()].every(p=>!p.alive))finishRace(r);
   }
+}
+function detachSocket(s){
+  const r=rooms.get(s.data.room);
+  if(!r)return;
+  const roomCode=r.code;removePlayerFromRoom(r,s.id);s.leave(roomCode);
   s.data.room=null;s.data.roomOwner=false;s.data.soloOwner=false;
+}
+const DISCONNECT_GRACE_MS=12_000;
+function holdDisconnectedSocket(s){
+  const r=rooms.get(s.data.room),p=r?.players.get(s.id);
+  if(!r||!p)return;
+  if(!p.userId){detachSocket(s);return;}
+  const oldId=s.id;
+  p.disconnectedAt=Date.now();p.throttle=false;p.brake=true;p.steer=0;p.drift=false;
+  p.disconnectTimer=setTimeout(()=>{
+    const current=rooms.get(r.code)?.players.get(oldId);
+    if(current===p&&current.disconnectedAt)removePlayerFromRoom(rooms.get(r.code),oldId);
+  },DISCONNECT_GRACE_MS);
+  p.disconnectTimer.unref?.();
+  s.data.room=null;s.data.roomOwner=false;s.data.soloOwner=false;
+  io.to(r.code).emit('state',snap(r));
+}
+function resumePreviousSession(s){
+  if(!s.data.userId)return false;
+  for(const r of rooms.values()){
+    const found=[...r.players.entries()].find(([,p])=>p.userId===s.data.userId&&p.disconnectedAt);
+    if(!found)continue;
+    const [oldId,p]=found;clearTimeout(p.disconnectTimer);r.players.delete(oldId);
+    p.id=s.id;p.disconnectedAt=0;p.disconnectTimer=null;p.brake=false;
+    r.players.set(s.id,p);if(r.ownerId===oldId)r.ownerId=s.id;
+    s.join(r.code);s.data.room=r.code;s.data.roomOwner=r.ownerId===s.id;s.data.soloOwner=r.mode==='solo'&&s.data.roomOwner;s.data.ceo=!!p.ceo;
+    s.emit('room',{code:r.code,ceo:r.ceo,mode:r.mode,solo:r.mode==='solo',roomName:r.roomName,track:r.track,canStart:s.data.roomOwner});
+    s.emit('state',snap(r));
+    if(r.running)s.emit('race:resume',{track:r.track,started:r.started});
+    return true;
+  }
+  return false;
 }
 async function canUseTrack(s,id,ceo=false){
   const track=trackById(id);if(!track.prestige||ceo)return true;
@@ -500,7 +609,7 @@ async function resolveCharacter(s,requested){
 }
 async function loadEquippedCosmetics(userId){
   if(!db||!userId)return[];
-  try{const rows=(await db.query(`SELECT s.code,s.type,s.data FROM player_items p JOIN shop_items s ON s.id=p.item_id WHERE p.user_id=$1 AND p.owned=TRUE AND p.equipped=TRUE ORDER BY s.type`,[userId])).rows;return rows.slice(0,8).map(row=>({code:String(row.code).slice(0,64),type:String(row.type).slice(0,32),data:row.data&&typeof row.data==='object'?row.data:{}}));}catch{return[];}
+  try{const rows=(await db.query(`SELECT s.code,s.type,s.data FROM neon_player_items p JOIN neon_shop_items s ON s.id=p.item_id WHERE p.user_id=$1 AND p.owned=TRUE AND p.equipped=TRUE ORDER BY s.type`,[userId])).rows;return rows.slice(0,8).map(row=>({code:String(row.code).slice(0,64),type:String(row.type).slice(0,32),data:row.data&&typeof row.data==='object'?row.data:{}}));}catch{return[];}
 }
 async function addHumanToRoom(s,r,nickname,characterId){
   const index=r.players.size,p=spawn(index);
@@ -519,6 +628,7 @@ function fillBots(r){
   }
 }
 io.on('connection',s=>{
+  resumePreviousSession(s);
   s.on('room:create',async({nickname,ceo,key,track,mode,roomName,password,characterId}={})=>{
     detachSocket(s);nickname=s.data.authNickname||cleanNick(nickname)||'Piloto';
     mode=mode==='solo'?'solo':'room';
@@ -534,7 +644,7 @@ io.on('connection',s=>{
     if(!(await canUseTrack(s,track,!!ceo)))return s.emit('error:game','O Protocolo Imortal exige Prestígio 5.');
     const code=ceo?'VELHO202026':mode==='solo'?soloCode():roomCode();
     const r=makeRoom(code,!!ceo,mode,name,passwordHash);r.ownerId=s.id;r.track=trackById(track).id;rooms.set(code,r);
-    await addHumanToRoom(s,r,nickname,characterId);
+    const human=await addHumanToRoom(s,r,nickname,characterId);human.ceo=!!ceo;
     if(mode==='solo'){
       fillBots(r);
     }
@@ -574,9 +684,9 @@ io.on('connection',s=>{
   s.on('room:start',()=>{
     const r=rooms.get(s.data.room);
     if(!r||!r.players.get(s.id))return;
-    if(r.ceo&&s.data.ceo)start(r);
+    if(r.ceo&&s.data.ceo){fillBots(r);start(r);}
     else if(r.mode==='solo'&&s.data.soloOwner)start(r);
-    else if(r.mode==='room'&&r.ownerId===s.id)start(r);
+    else if(r.mode==='room'&&r.ownerId===s.id){fillBots(r);start(r);}
   });
   s.on('room:leave',()=>{
     detachSocket(s);
@@ -605,7 +715,7 @@ io.on('connection',s=>{
     p.lastInput=now;
   });
   s.on('disconnect',()=>{
-    detachSocket(s);
+    holdDisconnectedSocket(s);
   });
 });
 setInterval(()=>{
@@ -657,9 +767,25 @@ setInterval(()=>{
   }
 },30_000).unref();
 
+function transientDatabaseError(error){
+  const code=String(error?.code||'');
+  return /^08/.test(code)||['57P01','57P02','57P03','53300'].includes(code)||/ECONNRESET|ECONNREFUSED|ETIMEDOUT|timeout|connection terminated|server closed/i.test(String(error?.message||''));
+}
+async function initDatabaseResilient(){
+  if(!db)return;
+  for(let attempt=1;attempt<=4;attempt++){
+    try{return await initDatabase();}
+    catch(error){
+      if(attempt===4||!transientDatabaseError(error))throw error;
+      const delay=Math.min(4000,700*2**(attempt-1));
+      console.warn(`NEON PATH database: conexão instável no boot; nova tentativa ${attempt+1}/4 em ${delay}ms`);
+      await new Promise(resolve=>setTimeout(resolve,delay));
+    }
+  }
+}
 async function boot(){
-  await initDatabase();
+  await initDatabaseResilient();
   console.log(`NEON PATH database: ${db?'ready':'disabled (DATABASE_URL not set)'}`);
-  server.listen(PORT,()=>console.log(`NEON PATH 12.0.1 listening on ${PORT}`));
+  server.listen(PORT,()=>console.log(`NEON PATH 12.0.4 listening on ${PORT}`));
 }
 boot().catch(err=>{console.error('NEON PATH boot failed:',err);process.exitCode=1;});

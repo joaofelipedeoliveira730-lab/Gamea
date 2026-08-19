@@ -1,5 +1,5 @@
 {
-  "version": "12.0.1-prestige",
+  "version": "12.0.4-prestige",
   "download_strategy": "lazy-per-race",
   "packs": {
     "lite": [
@@ -21,7 +21,13 @@
       "7-rocky.svg",
       "8-nitro.svg"
     ],
-    "hd_includes": ["lite", "hd_scenes", "environment_textures", "sky_billboards", "arena_detail"]
+    "hd_includes": [
+      "lite",
+      "hd_scenes",
+      "environment_textures",
+      "sky_billboards",
+      "arena_detail"
+    ]
   },
   "budgets": {
     "initial_shell_kb": 450,

@@ -1,4 +1,4 @@
--- NEON PATH 12.0.1 · esquema de referência para instalações novas.
+-- NEON PATH 12.0.3 · esquema de referência para instalações novas.
 -- O server.js também executa migrações idempotentes e preserva bancos antigos.
 
 CREATE TABLE IF NOT EXISTS users (
@@ -62,7 +62,7 @@ CREATE TABLE IF NOT EXISTS player_characters (
   PRIMARY KEY(user_id,character_id)
 );
 
-CREATE TABLE IF NOT EXISTS shop_items (
+CREATE TABLE IF NOT EXISTS neon_shop_items (
   id SERIAL PRIMARY KEY,
   code VARCHAR(64) UNIQUE NOT NULL,
   name VARCHAR(120) NOT NULL,
@@ -73,9 +73,9 @@ CREATE TABLE IF NOT EXISTS shop_items (
   data JSONB NOT NULL DEFAULT '{}'::jsonb,
   enabled BOOLEAN NOT NULL DEFAULT TRUE
 );
-CREATE TABLE IF NOT EXISTS player_items (
+CREATE TABLE IF NOT EXISTS neon_player_items (
   user_id BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-  item_id INTEGER NOT NULL REFERENCES shop_items(id) ON DELETE CASCADE,
+  item_id INTEGER NOT NULL REFERENCES neon_shop_items(id) ON DELETE CASCADE,
   owned BOOLEAN NOT NULL DEFAULT TRUE,
   equipped BOOLEAN NOT NULL DEFAULT FALSE,
   PRIMARY KEY(user_id,item_id)

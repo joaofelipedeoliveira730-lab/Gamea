@@ -18,7 +18,7 @@ for(const id of usedIds)assert(htmlIds.includes(id),`ID usado no app não existe
 for(const id of ['bootSplash','termsGate','resourceLite','resourceHd','playQuick','modeOnline','prestigeBtn','shopBtn','inventoryBtn','rank','touchLeft','touchRight','touchDrift','touchAccelerate','touchBrake','touchTurbo','touchItem','loadingVideo','pausePanel','finish'])assert(htmlIds.includes(id),`contrato visual ausente: ${id}`);
 
 // Recursos e formatos reais.
-assert.strictEqual(manifest.version,'12.0.1-prestige');
+assert.strictEqual(manifest.version,'12.0.4-prestige');
 assert.strictEqual(manifest.hd_scenes.length,8);
 assert.strictEqual(manifest.portraits.length,8);
 assert(manifest.packs.lite.includes('loading-cinematic.mp4'));
@@ -51,6 +51,9 @@ assert(server.includes('immortal_protocol'),'recompensa final de Prestígio ause
 assert(!server.includes("'Velho202026'"),'segredo antigo embutido no servidor');
 assert(!server.includes('p.x=m.x')&&!server.includes('p.y=m.y'),'cliente controla coordenadas do servidor');
 assert(html.includes('three@0.178.0'),'versão do motor Three.js não está fixada');
+assert(html.includes('cdn.socket.io/4.8.1/socket.io.min.js'),'cliente Socket.IO não funciona fora do mesmo domínio');
+assert(!html.includes('src="/socket.io/socket.io.js"'),'Socket.IO ainda depende da raiz do domínio');
+assert(!app.includes('portrait:"/1-spark.svg"'),'retratos ainda usam caminho absoluto e quebram no GitHub Pages');
 assert(css.includes('@media(pointer:coarse)'),'controles móveis não detectados');
 for(const track of ['neon-city','pirate-bay','desert-run','mountain-peak','space-station','jungle-falls','volcano-rush','ice-world','immortal-grid']){assert(app.includes(`id:"${track}"`),`pista ausente no cliente: ${track}`);assert(server.includes(`id:'${track}'`),`pista ausente no servidor: ${track}`);}
 
@@ -105,4 +108,4 @@ let races=0;
 for(let mode=0;mode<3;mode++)for(let map=0;map<tracks.length;map++)for(let seed=0;seed<20;seed++){simulateRace(map,0xabc000+mode*1000+map*100+seed);races++;}
 assert.strictEqual(races,540);
 
-console.log(`NEON PATH 12.0.1 CORE: PASS · ${races} corridas · 1.200 progressões · ${htmlIds.length} IDs validados`);
+console.log(`NEON PATH 12.0.4 CORE: PASS · ${races} corridas · 1.200 progressões · ${htmlIds.length} IDs validados`);

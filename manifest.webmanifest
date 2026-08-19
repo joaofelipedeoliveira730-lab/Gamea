@@ -3,18 +3,18 @@
   "short_name": "NEON PATH",
   "description": "Corridas arcade 3D online com progressão, prestígio e ranking mundial.",
   "lang": "pt-BR",
-  "start_url": "/",
-  "scope": "/",
+  "start_url": "./",
+  "scope": "./",
   "display": "fullscreen",
   "orientation": "any",
   "background_color": "#03050b",
   "theme_color": "#060914",
   "categories": ["games", "entertainment"],
   "icons": [
-    {"src":"/1-spark.svg","sizes":"any","type":"image/svg+xml","purpose":"any maskable"}
+    {"src":"1-spark.svg","sizes":"any","type":"image/svg+xml","purpose":"any maskable"}
   ],
   "shortcuts": [
-    {"name":"Jogar agora","short_name":"Jogar","url":"/?quick=1","icons":[{"src":"/1-spark.svg","sizes":"any","type":"image/svg+xml"}]},
-    {"name":"Ranking mundial","short_name":"Ranking","url":"/?rank=1","icons":[{"src":"/prestige-emblem.webp","sizes":"640x640","type":"image/webp"}]}
+    {"name":"Jogar agora","short_name":"Jogar","url":"?quick=1","icons":[{"src":"1-spark.svg","sizes":"any","type":"image/svg+xml"}]},
+    {"name":"Ranking mundial","short_name":"Ranking","url":"?rank=1","icons":[{"src":"prestige-emblem.webp","sizes":"640x640","type":"image/webp"}]}
   ]
 }

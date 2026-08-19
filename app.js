@@ -26,14 +26,14 @@ let keys={left:false,right:false,drift:false,accelerate:false,brake:false}, touc
 let frameBudgetStarted=performance.now(),frameBudgetCount=0,adaptiveReduced=false,toastTimer=null;
 
 const CHARACTERS=[
- {id:1,name:"SPARK",icon:"◈",portrait:"/1-spark.svg",color:"#38d9ff",stats:[78,76,72,88],unlock:0,rarity:"INICIAL"},
- {id:2,name:"LUNA",icon:"◒",portrait:"/2-luna.svg",color:"#ff5fb4",stats:[82,74,88,76],unlock:5,rarity:"RARA"},
- {id:3,name:"STEEL",icon:"⬢",portrait:"/3-steel.svg",color:"#c9d3df",stats:[70,88,62,82],unlock:10,rarity:"RARA"},
- {id:4,name:"ZIPPY",icon:"◇",portrait:"/4-zippy.svg",color:"#7cff58",stats:[92,67,72,86],unlock:18,rarity:"ÉPICA"},
- {id:5,name:"BLAZE",icon:"△",portrait:"/5-blaze.svg",color:"#ff6b35",stats:[80,84,66,90],unlock:28,rarity:"ÉPICA"},
- {id:6,name:"FROST",icon:"❄",portrait:"/6-frost.svg",color:"#bcecff",stats:[74,80,90,70],unlock:40,rarity:"LENDÁRIA"},
- {id:7,name:"ROCKY",icon:"⬣",portrait:"/7-rocky.svg",color:"#b77d58",stats:[66,92,70,80],unlock:55,rarity:"LENDÁRIA"},
- {id:8,name:"NITRO",icon:"✦",portrait:"/8-nitro.svg",color:"#ffd84a",stats:[88,78,78,96],unlock:75,rarity:"MÍTICA"}
+ {id:1,name:"SPARK",icon:"◈",portrait:"1-spark.svg",color:"#38d9ff",stats:[78,76,72,88],unlock:0,rarity:"INICIAL"},
+ {id:2,name:"LUNA",icon:"◒",portrait:"2-luna.svg",color:"#ff5fb4",stats:[82,74,88,76],unlock:5,rarity:"RARA"},
+ {id:3,name:"STEEL",icon:"⬢",portrait:"3-steel.svg",color:"#c9d3df",stats:[70,88,62,82],unlock:10,rarity:"RARA"},
+ {id:4,name:"ZIPPY",icon:"◇",portrait:"4-zippy.svg",color:"#7cff58",stats:[92,67,72,86],unlock:18,rarity:"ÉPICA"},
+ {id:5,name:"BLAZE",icon:"△",portrait:"5-blaze.svg",color:"#ff6b35",stats:[80,84,66,90],unlock:28,rarity:"ÉPICA"},
+ {id:6,name:"FROST",icon:"❄",portrait:"6-frost.svg",color:"#bcecff",stats:[74,80,90,70],unlock:40,rarity:"LENDÁRIA"},
+ {id:7,name:"ROCKY",icon:"⬣",portrait:"7-rocky.svg",color:"#b77d58",stats:[66,92,70,80],unlock:55,rarity:"LENDÁRIA"},
+ {id:8,name:"NITRO",icon:"✦",portrait:"8-nitro.svg",color:"#ffd84a",stats:[88,78,78,96],unlock:75,rarity:"MÍTICA"}
 ];
 const TRACKS=[
  {id:"neon-city",name:"NEON APEX",theme:"city",desc:"Megacidade molhada · velocidade alta",colors:[0x071a43,0xff22d5],world:"MUNDO 01",rx:48,rz:27},
@@ -49,11 +49,33 @@ const TRACKS=[
 const PRESTIGE_TIERS=[
  {level:0,name:"RECRUTA",xp:0,reward:"Acesso ao circuito"},{level:1,name:"FAÍSCA",xp:1250,reward:"Rastro da Faísca"},{level:2,name:"VANGUARDA",xp:3000,reward:"+1.500 moedas"},{level:3,name:"FANTASMA",xp:6000,reward:"Aura Fantasma Real"},{level:4,name:"LENDÁRIO",xp:10000,reward:"Coroa da Lenda"},{level:5,name:"IMORTAL",xp:15000,reward:"Protocolo Imortal + circuito secreto"}
 ];
+const sleep=ms=>new Promise(resolve=>setTimeout(resolve,ms));
+const friendlyApiError=(code,status)=>{
+ const map={database_unavailable:"Banco de dados temporariamente indisponível",muitas_tentativas:"Muitas tentativas. Aguarde um pouco",unauthorized:"Sessão expirada",register_error:"Não foi possível criar sua conta",login_error:"Não foi possível entrar agora",shop_error:"Loja temporariamente indisponível",inventory_error:"Inventário temporariamente indisponível",purchase_error:"Compra não concluída",equip_error:"Não foi possível equipar agora"};
+ return map[code]||((status>=500)?"Servidor se recuperando. Tente novamente em instantes.":String(code||"Não foi possível concluir a operação"));
+};
 const api=async(path,opts={})=>{
  const headers={"Content-Type":"application/json",...(opts.headers||{})};
  if(authToken)headers.Authorization="Bearer "+authToken;
- const r=await fetch(API_BASE+path,{...opts,headers,credentials:"same-origin"});const j=await r.json().catch(()=>({}));
- if(!r.ok){const e=new Error(j.error||"erro");e.status=r.status;throw e;}return j;
+ const method=String(opts.method||"GET").toUpperCase(),maxAttempts=method==="GET"?2:1;
+ let lastError;
+ for(let attempt=0;attempt<maxAttempts;attempt++){
+  const controller=new AbortController(),timer=setTimeout(()=>controller.abort(),10_000);
+  try{
+   const r=await fetch(API_BASE+path,{...opts,headers,credentials:"same-origin",signal:controller.signal});
+   const j=await r.json().catch(()=>({}));
+   if(!r.ok){const e=new Error(friendlyApiError(j.error,r.status));e.code=j.error;e.status=r.status;throw e;}
+   return j;
+  }catch(error){
+   lastError=error;
+   const transient=error?.name==="AbortError"||!error?.status||[502,503,504].includes(error.status);
+   if(attempt+1<maxAttempts&&transient){await sleep(450);continue;}
+   if(error?.name==="AbortError"){const e=new Error("Servidor demorou para responder. Tentando manter sua sessão estável.");e.status=408;throw e;}
+   if(!error?.status){const e=new Error("Conexão instável. O jogo vai reconectar automaticamente.");e.cause=error;throw e;}
+   throw error;
+  }finally{clearTimeout(timer);}
+ }
+ throw lastError||new Error("Falha de conexão");
 };
 function escapeHtml(x){return String(x).replace(/[&<>"']/g,m=>({"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#39;"}[m]));}
 function show(id){document.querySelectorAll("#app>.screen,#app>#game").forEach(e=>e.classList.add("hidden"));$(id)?.classList.remove("hidden");}
@@ -85,7 +107,7 @@ function boot(){
  const fill=$("bootFill"),text=$("bootText"),steps=[[22,"CARREGANDO INTERFACE..."],[56,"PREPARANDO PISTAS..."],[82,"SINCRONIZANDO PERFIL..."],[100,"PRONTO PARA CORRER"]];
  steps.forEach(([pct,label],i)=>setTimeout(()=>{if(fill)fill.style.width=pct+"%";if(text)text.textContent=label;},160+i*230));
  setTimeout(()=>$("bootSplash")?.classList.add("done"),1300);
- if("serviceWorker" in navigator && location.protocol!=="file:")navigator.serviceWorker.register("/service-worker.js").catch(()=>{});
+ if("serviceWorker" in navigator && location.protocol!=="file:")navigator.serviceWorker.register(new URL("service-worker.js",document.baseURI)).catch(()=>{});
 }
 addEventListener("DOMContentLoaded",boot,{once:true});
 addEventListener("online",()=>{updateConnectionPill(socket.connected);toast("Conexão restaurada")});
@@ -105,7 +127,7 @@ async function reportBug(err,{source="client",message:msg,stack}={}){
   lastBugFingerprint=fp;lastBugAt=now;
   try{await fetch(API_BASE+"/api/bug-report",{method:"POST",headers:{"Content-Type":"application/json",...(authToken?{Authorization:"Bearer "+authToken}:{})},body:JSON.stringify({fingerprint:fp,message:text,stack:String(stack||err?.stack||"").slice(0,6000),source,screen:document.querySelector("#game:not(.hidden)")?"game":(document.querySelector(".screen:not(.hidden)")?.id||"unknown"),track:trackDef?.id||selectedTrack,mode:roomMode,quality:effectiveQuality(),viewport:`${innerWidth}x${innerHeight}`})});}catch{}
 }
-function showBugRecovery(title="OPS! O JOGO ENCONTROU UM PROBLEMA",text="O erro foi registrado automaticamente. O jogo vai tentar continuar com segurança."){
+function showBugRecovery(title="AJUSTANDO A SESSÃO",text="Detectamos uma instabilidade e o jogo está ativando uma rota segura automaticamente."){
   const box=$("bugRecovery");if(!box)return;
   $("bugRecoveryTitle").textContent=title;$("bugRecoveryText").textContent=text;
   bugRecoverySeconds=15;$("bugRecoveryTimer").textContent="Fechando em 15s...";box.classList.remove("hidden");
@@ -117,14 +139,14 @@ async function handleClientFault(err,source="runtime"){
   const text=String(err?.message||err||"Erro desconhecido");
   console.error("NEON PATH AUTO-RECOVERY",source,err);
   await reportBug(err,{source});
-  showBugRecovery("ERRO RECUPERADO", "Detectamos uma falha e enviamos um relatório automático para o CEO. O jogo será recuperado sem travar a sessão.");
+  showBugRecovery("SESSÃO ESTABILIZADA", "Uma instabilidade foi detectada. O jogo está usando o modo seguro para evitar que sua sessão trave.");
   if(gameRunning){
     gameRunning=false;
     if(recoveryAttempts<2){
       recoveryAttempts++;
       setTimeout(()=>{try{recoverRaceAfterRenderError(trackDef?.id||selectedTrack);}catch{}},450);
     }else{
-      setTimeout(()=>{recoveryAttempts=0;show("menu");message("A corrida foi encerrada com segurança. O erro foi enviado ao CEO.");try{socket.emit("room:leave");}catch{}},1800);
+      setTimeout(()=>{recoveryAttempts=0;show("menu");message("A corrida foi encerrada com segurança. Você pode iniciar outra normalmente.");try{socket.emit("room:leave");}catch{}},1800);
     }
   }
   return text;
@@ -237,13 +259,13 @@ async function downloadGameResources(){
  if(!$("termsAccept").checked)return;
  $("downloadResources").disabled=true;$("resourceStatus").textContent=`Preparando pacote ${selectedResourcePack==="hd"?"HD":"essencial"}...`;
  try{
-  const manifest=await fetch("/assets-manifest.json",{cache:"no-store"}).then(r=>r.json());
+  const manifest=await fetch(new URL("assets-manifest.json",document.baseURI),{cache:"no-store"}).then(r=>r.json());
   const lite=manifest.packs?.lite||["index.html","style.css","app.js","loading-hero.webp","loading-cinematic.mp4","velocity-protocol.mp3",...(manifest.portraits||[]).slice(0,2)];
   const hd=manifest.packs?.hd||[...lite,...(manifest.hd_scenes||[]),...(manifest.portraits||[]),...(manifest.environment_textures||[]),...(manifest.sky_billboards||[]),...(manifest.arena_detail||[])];
   const files=[...new Set(selectedResourcePack==="hd"?hd:lite)];
   if(!("caches" in window))throw new Error("cache_unavailable");
   const cache=await caches.open("neon-path-resources-v12");let cursor=0,done=0,failed=0;
-  const worker=async()=>{while(cursor<files.length){const index=cursor++,file=files[index];try{await cache.add(new Request(file.startsWith("/")?file:"/"+file,{cache:"reload"}));}catch{failed++;}done++;const pct=Math.round(done/files.length*100);$("resourcePercent").textContent=pct+"%";$("resourceFill").style.width=pct+"%";$("resourceStatus").textContent=`Preparando ${done} de ${files.length} recursos...`;}};
+  const worker=async()=>{while(cursor<files.length){const index=cursor++,file=files[index];try{await cache.add(new Request(new URL(file.replace(/^\//,""),document.baseURI),{cache:"reload"}));}catch{failed++;}done++;const pct=Math.round(done/files.length*100);$("resourcePercent").textContent=pct+"%";$("resourceFill").style.width=pct+"%";$("resourceStatus").textContent=`Preparando ${done} de ${files.length} recursos...`;}};
   await Promise.all(Array.from({length:Math.min(3,files.length)},worker));
   if(failed>Math.ceil(files.length*.35))throw new Error("many_assets_failed");
   localStorage.setItem(`neon_resources_v12_${selectedResourcePack}`,"ready");$("resourceStatus").textContent=`Pacote pronto · ${files.length-failed} recursos armazenados.`;$("resourcePercent").textContent="100%";$("resourceFill").style.width="100%";$("continueWithoutDownload").disabled=false;$("downloadResources").textContent="PACOTE PRONTO";
@@ -374,8 +396,9 @@ function renderLobby(s){
  $("roomCode").textContent=s.code||"------";$("roomName").textContent=s.roomName?`NOME: ${s.roomName}`:"";$("lobbyTrack").textContent=(TRACKS.find(t=>t.id===s.track)?.name)||s.trackName||"NEON APEX";
  $("players").innerHTML=(s.players||[]).map((p,i)=>`<div class="player" data-seat="${i+1}" style="--c:${p.color}"><span><b>${escapeHtml(p.nickname)}</b><small>${p.finish?`${p.finish}º LUGAR`:p.alive?"PRONTO":"FORA"}</small></span><strong style="color:${p.color}">●</strong></div>`).join("");
 }
-socket.on("connect",()=>{updateConnectionPill(true);message("SERVIDOR ONLINE");});
-socket.on("disconnect",()=>{updateConnectionPill(false);message("Reconectando ao servidor...");});
+let socketWasInterrupted=false;
+socket.on("connect",()=>{updateConnectionPill(true);message("SERVIDOR ONLINE");if(socketWasInterrupted){socketWasInterrupted=false;toast("Conexão estabilizada");}});
+socket.on("disconnect",()=>{socketWasInterrupted=true;updateConnectionPill(false);if(gameRunning)toast("Conexão oscilou · mantendo sua corrida",3200);else message("Reconectando ao servidor...");});
 socket.on("connect_error",error=>{updateConnectionPill(false);if(error?.message==='unauthorized'){logout(false);$("authMsg").textContent="Sua sessão expirou. Entre novamente.";}else message("Conexão instável — tentando novamente...");});
 socket.on("error:game",x=>{const text=typeof x==="string"?x:(x?.message||x?.error||"Erro na partida");if($("lobbyMsg"))$("lobbyMsg").textContent=text;if($("privateMsg")&&!$("privatePanel").classList.contains("hidden"))$("privateMsg").textContent=text;message(text);});
 socket.on("room",x=>{
@@ -405,6 +428,12 @@ socket.on("race:countdown",x=>{
  if(x.value==='GO')setTimeout(()=>el.classList.add('hidden'),700);
 });
 socket.on("start",x=>{disarmRaceStartWatchdog();startGame(x.track);});
+socket.on("race:resume",x=>{
+ disarmRaceStartWatchdog();
+ lastRaceStart=Number(x?.started)||lastRaceStart||Date.now();
+ if(gameRunning&&trackDef?.id===x?.track){toast("Corrida sincronizada novamente");return;}
+ startGame(x?.track||selectedTrack,{watchdog:true});
+});
 socket.on("hit",x=>{playSfx("hit");showHit(x)});
 socket.on("race:finish",x=>showFinish(x.results,x.track,x.rewards,x.profile));
 
@@ -480,7 +509,7 @@ function addBillboard(group,url,x,z,w=9,h=5){
  return s;
 }
 function addBackdrop(t){
- const path=t.id==='immortal-grid'?'/prestige-emblem.webp':`/${t.id}.svg`;
+ const path=t.id==='immortal-grid'?'prestige-emblem.webp':`${t.id}.svg`;
  const spriteMat=new THREE.SpriteMaterial({color:0xffffff,transparent:true,opacity:.94,depthWrite:false,fog:false});
  trackBackdrop=new THREE.Sprite(spriteMat);trackBackdrop.position.set(0,34,0);trackBackdrop.scale.set(210,118,1);scene.add(trackBackdrop);
  backdropPromise=new Promise(resolve=>trackTextureLoader.load(path,tex=>{tex.colorSpace=THREE.SRGBColorSpace;spriteMat.map=tex;spriteMat.needsUpdate=true;resolve(true)},undefined,()=>resolve(false)));
@@ -857,11 +886,11 @@ function showFinish(results=[],track,rewards={},profile){
  gameRunning=false;$("loadingVideo")?.pause();playSfx("finish");show("finish");
  const top=results.slice(0,3);
  $("podium").innerHTML=top.map((p,i)=>{const c=CHARACTERS.find(x=>x.id===Number(p.characterId))||CHARACTERS[i%CHARACTERS.length];return `<div class="pod ${i===0?"first":i===1?"second":"third"}"><div class="avatar"><img src="${c.portrait}" alt="${c.name}" style="width:100%;height:100%;object-fit:cover;border-radius:50%"></div><b>${p.position||i+1}º · ${escapeHtml(p.nickname)}</b><small>${i===0?"VITÓRIA":i===1?"VICE-CAMPEÃO":"PÓDIO"}</small></div>`}).join("");
- const xp=Math.max(0,Number(rewards?.xp)||0),coins=Math.max(0,Number(rewards?.coins)||0),ph=Number(rewards?.ph)||0,prestigeUp=!!rewards?.prestigeUp;
- $("rewards").innerHTML=`<div class="reward">◉ +${formatNumber(coins)} MOEDAS</div><div class="reward">XP +${formatNumber(xp)}</div><div class="reward">${ph>=0?"+":""}${ph} PH</div>${Number(rewards?.dailyBonus)>0?'<div class="reward">MISSÃO DIÁRIA +450 ◉</div>':""}${Number(rewards?.prestigeCoinBonus)>0?'<div class="reward">COFRE VANGUARDA +1.500 ◉</div>':""}${prestigeUp?'<div class="reward">NOVO PRESTÍGIO · ITEM DESBLOQUEADO!</div>':""}`;
+ const xp=Math.max(0,Number(rewards?.xp)||0),coins=Math.max(0,Number(rewards?.coins)||0),ph=Number(rewards?.ph)||0,prestigeUp=!!rewards?.prestigeUp,persisted=rewards?.persisted!==false;
+ $("rewards").innerHTML=`<div class="reward">◉ +${formatNumber(coins)} MOEDAS</div><div class="reward">XP +${formatNumber(xp)}</div><div class="reward">${ph>=0?"+":""}${ph} PH</div>${Number(rewards?.dailyBonus)>0?'<div class="reward">MISSÃO DIÁRIA +450 ◉</div>':""}${Number(rewards?.prestigeCoinBonus)>0?'<div class="reward">COFRE VANGUARDA +1.500 ◉</div>':""}${prestigeUp?'<div class="reward">NOVO PRESTÍGIO · ITEM DESBLOQUEADO!</div>':""}${persisted?"":'<div class="reward pending-save">PROGRESSO EM SINCRONIZAÇÃO</div>'}`;
  if(profile)applyProfile(profile);else if(authToken)setTimeout(()=>api("/api/profile").then(applyProfile).catch(()=>{}),400);
 }
-$("nextRace").onclick=()=>{show("menu");message("Recompensas salvas. Pronto para outra corrida.")};
+$("nextRace").onclick=()=>{show("menu");message("Pronto para outra corrida.")};
 $("raceAgain").onclick=()=>{show("menu");openModes()};
 
 function modal(title,html,kicker="NEON PATH"){const box=$("modalContent");box.innerHTML=`<span class="eyebrow">${escapeHtml(kicker)}</span><h2>${escapeHtml(title)}</h2>${html}`;$("overlayPanel").classList.remove("hidden")}
