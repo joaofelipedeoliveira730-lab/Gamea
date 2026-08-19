@@ -1,7 +1,9 @@
 import * as THREE from "three";
 
 const $=id=>document.getElementById(id);
-const socket=typeof io==="function" ? io({transports:["websocket","polling"],autoConnect:true,reconnection:true,reconnectionAttempts:Infinity,reconnectionDelay:500,reconnectionDelayMax:3000}) : {
+const API_BASE=String(window.NEON_API_BASE||"").replace(/\/$/,"");
+let authToken=localStorage.getItem("neon_token")||"";
+const socket=typeof io==="function" ? io(API_BASE||undefined,{transports:["websocket","polling"],autoConnect:true,reconnection:true,reconnectionAttempts:Infinity,reconnectionDelay:500,reconnectionDelayMax:3000,timeout:9000,auth:{token:authToken}}) : {
   connected:false,
   on(){return this;},
   emit(){return false;},
@@ -16,42 +18,79 @@ function effectiveQuality(){
   if(DEVICE_LOW)return "low";
   return Math.min(devicePixelRatio||1,1.25)>=1.1?"high":"medium";
 }
-let authToken=localStorage.getItem("neon_token")||"";
-let currentUser="Piloto", selectedCharacter=0, selectedTrack="neon-city", pendingAction="quick";
+let currentUser="Piloto", selectedCharacter=1, selectedTrack=localStorage.getItem("neon_track")||"neon-city", pendingAction="quick";
+let currentProfile=null,selectedResourcePack=localStorage.getItem("neon_resource_pack")||"lite",audioEnabled=localStorage.getItem("neon_audio")!=="off";
 let renderer,scene,camera,clock,playerMeshes=new Map(),itemBoxes=[],worldGroup,environmentGroup,environmentSeed=0,particles,trackDef,lastState,lastRaceStart=0,gameRunning=false,roomMode="room",trackBackdrop=null,trackTextureLoader=new THREE.TextureLoader(),backdropPromise=Promise.resolve(),loadingTimer=null,raceStartWatchdog=null,raceStarting=false;
 let lastFrameTime=performance.now();
-let perfSampleAt=performance.now(), perfFrames=0, perfFps=60, adaptiveScale=1, lastCanvasW=0, lastCanvasH=0;
 let keys={left:false,right:false,drift:false,accelerate:false,brake:false}, touchTimer=null, cameraTarget=new THREE.Vector3(), cameraLook=new THREE.Vector3(), renderFrame=0;
+let frameBudgetStarted=performance.now(),frameBudgetCount=0,adaptiveReduced=false,toastTimer=null;
 
 const CHARACTERS=[
- {id:1,name:"SPARK",icon:"🤖",portrait:"/1-spark.svg",color:"#38d9ff",stats:[78,76,72,88]},
- {id:2,name:"LUNA",icon:"🦊",portrait:"/2-luna.svg",color:"#ff5fb4",stats:[82,74,88,76]},
- {id:3,name:"STEEL",icon:"🦾",portrait:"/3-steel.svg",color:"#c9d3df",stats:[70,88,62,82]},
- {id:4,name:"ZIPPY",icon:"👽",portrait:"/4-zippy.svg",color:"#7cff58",stats:[92,67,72,86]},
- {id:5,name:"BLAZE",icon:"🐲",portrait:"/5-blaze.svg",color:"#ff6b35",stats:[80,84,66,90]},
- {id:6,name:"FROST",icon:"🐺",portrait:"/6-frost.svg",color:"#bcecff",stats:[74,80,90,70]},
- {id:7,name:"ROCKY",icon:"🐻",portrait:"/7-rocky.svg",color:"#b77d58",stats:[66,92,70,80]},
- {id:8,name:"NITRO",icon:"🧑‍🚀",portrait:"/8-nitro.svg",color:"#ffd84a",stats:[88,78,78,96]}
+ {id:1,name:"SPARK",icon:"◈",portrait:"/1-spark.svg",color:"#38d9ff",stats:[78,76,72,88],unlock:0,rarity:"INICIAL"},
+ {id:2,name:"LUNA",icon:"◒",portrait:"/2-luna.svg",color:"#ff5fb4",stats:[82,74,88,76],unlock:5,rarity:"RARA"},
+ {id:3,name:"STEEL",icon:"⬢",portrait:"/3-steel.svg",color:"#c9d3df",stats:[70,88,62,82],unlock:10,rarity:"RARA"},
+ {id:4,name:"ZIPPY",icon:"◇",portrait:"/4-zippy.svg",color:"#7cff58",stats:[92,67,72,86],unlock:18,rarity:"ÉPICA"},
+ {id:5,name:"BLAZE",icon:"△",portrait:"/5-blaze.svg",color:"#ff6b35",stats:[80,84,66,90],unlock:28,rarity:"ÉPICA"},
+ {id:6,name:"FROST",icon:"❄",portrait:"/6-frost.svg",color:"#bcecff",stats:[74,80,90,70],unlock:40,rarity:"LENDÁRIA"},
+ {id:7,name:"ROCKY",icon:"⬣",portrait:"/7-rocky.svg",color:"#b77d58",stats:[66,92,70,80],unlock:55,rarity:"LENDÁRIA"},
+ {id:8,name:"NITRO",icon:"✦",portrait:"/8-nitro.svg",color:"#ffd84a",stats:[88,78,78,96],unlock:75,rarity:"MÍTICA"}
 ];
 const TRACKS=[
- {id:"neon-city",name:"NEON CITY",theme:"city",desc:"Arranha-céus e curvas molhadas",colors:[0x071a43,0xff22d5]},
- {id:"pirate-bay",name:"PIRATE BAY",theme:"pirate",desc:"Porto, navios e pôr do sol",colors:[0x075a73,0xf08d39]},
- {id:"desert-run",name:"DESERT RUN",theme:"desert",desc:"Dunas, pontes e calor",colors:[0xd9913e,0x6b2c16]},
- {id:"mountain-peak",name:"MOUNTAIN PEAK",theme:"mountain",desc:"Montanha, pinheiros e neblina",colors:[0x6fa8cc,0x24394f]},
- {id:"space-station",name:"SPACE STATION",theme:"space",desc:"Circuito orbital neon",colors:[0x111a6b,0x04050b]},
- {id:"jungle-falls",name:"JUNGLE FALLS",theme:"jungle",desc:"Floresta, ruínas e cachoeiras",colors:[0x116847,0x081b12]},
- {id:"volcano-rush",name:"VOLCANO RUSH",theme:"volcano",desc:"Lava, cinzas e curvas rápidas",colors:[0xd84516,0x210308]},
- {id:"ice-world",name:"ICE WORLD",theme:"ice",desc:"Gelo, aurora e pista congelada",colors:[0x9deaff,0x1d4d7b]}
+ {id:"neon-city",name:"NEON APEX",theme:"city",desc:"Megacidade molhada · velocidade alta",colors:[0x071a43,0xff22d5],world:"MUNDO 01",rx:48,rz:27},
+ {id:"pirate-bay",name:"PORTO FANTASMA",theme:"pirate",desc:"Tempestade, docas e navios perdidos",colors:[0x03293c,0x16d7d8],world:"MUNDO 02",rx:50,rz:28},
+ {id:"desert-run",name:"DUNA SOLAR",theme:"desert",desc:"Calor extremo e retas de areia",colors:[0xd9913e,0x6b2c16],world:"MUNDO 03",rx:52,rz:29},
+ {id:"mountain-peak",name:"PICO TEMPESTADE",theme:"mountain",desc:"Abismos, pinheiros e neblina",colors:[0x6fa8cc,0x24394f],world:"MUNDO 04",rx:46,rz:30},
+ {id:"space-station",name:"ÓRBITA ZERO",theme:"space",desc:"Gravidade baixa e circuito orbital",colors:[0x111a6b,0x04050b],world:"MUNDO 05",rx:50,rz:27},
+ {id:"jungle-falls",name:"TEMPLO PERDIDO",theme:"jungle",desc:"Ruínas vivas entre cachoeiras",colors:[0x116847,0x081b12],world:"MUNDO 06",rx:48,rz:29},
+ {id:"volcano-rush",name:"CORAÇÃO VULCÂNICO",theme:"volcano",desc:"Lava, cinzas e curvas agressivas",colors:[0xd84516,0x210308],world:"MUNDO 07",rx:52,rz:28},
+ {id:"ice-world",name:"AURORA GLACIAL",theme:"ice",desc:"Gelo negro sob a aurora",colors:[0x9deaff,0x1d4d7b],world:"MUNDO 08",rx:49,rz:30},
+ {id:"immortal-grid",name:"PROTOCOLO IMORTAL",theme:"immortal",desc:"Circuito secreto · exige Prestígio 5",colors:[0x190d35,0xffd45f],world:"PRESTÍGIO 5",rx:54,rz:31,prestige:5}
+];
+const PRESTIGE_TIERS=[
+ {level:0,name:"RECRUTA",xp:0,reward:"Acesso ao circuito"},{level:1,name:"FAÍSCA",xp:1250,reward:"Rastro da Faísca"},{level:2,name:"VANGUARDA",xp:3000,reward:"+1.500 moedas"},{level:3,name:"FANTASMA",xp:6000,reward:"Aura Fantasma Real"},{level:4,name:"LENDÁRIO",xp:10000,reward:"Coroa da Lenda"},{level:5,name:"IMORTAL",xp:15000,reward:"Protocolo Imortal + circuito secreto"}
 ];
 const api=async(path,opts={})=>{
  const headers={"Content-Type":"application/json",...(opts.headers||{})};
  if(authToken)headers.Authorization="Bearer "+authToken;
- const r=await fetch(path,{...opts,headers});const j=await r.json().catch(()=>({}));
- if(!r.ok)throw new Error(j.error||"erro");return j;
+ const r=await fetch(API_BASE+path,{...opts,headers,credentials:"same-origin"});const j=await r.json().catch(()=>({}));
+ if(!r.ok){const e=new Error(j.error||"erro");e.status=r.status;throw e;}return j;
 };
 function escapeHtml(x){return String(x).replace(/[&<>"']/g,m=>({"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#39;"}[m]));}
 function show(id){document.querySelectorAll("#app>.screen,#app>#game").forEach(e=>e.classList.add("hidden"));$(id)?.classList.remove("hidden");}
-function message(t){$("msg").textContent=t||"";}
+function message(t){if($("msg"))$("msg").textContent=t||"";}
+function toast(t,ms=2600){const el=$("toast");if(!el)return;clearTimeout(toastTimer);el.textContent=t;el.classList.remove("hidden");toastTimer=setTimeout(()=>el.classList.add("hidden"),ms);}
+function formatNumber(v){return Math.max(0,Number(v)||0).toLocaleString("pt-BR");}
+
+// ===== BOOT / PWA / ORIGINAL AUDIO =====
+const soundtrack=$("soundtrack");
+let musicVolume=Math.max(0,Math.min(1,Number(localStorage.getItem("neon_music_volume")??0.34))),audioContext=null;
+function applyQualityClass(){document.documentElement.classList.toggle("quality-low",effectiveQuality()==="low");}
+function syncAudio(){if(soundtrack){soundtrack.volume=audioEnabled?musicVolume:0;soundtrack.muted=!audioEnabled;}if($("raceAudio"))$("raceAudio").textContent=audioEnabled?"♪":"×";}
+async function startAudio(){if(!audioEnabled||!soundtrack)return;syncAudio();try{await soundtrack.play();}catch{}}
+function toggleAudio(){audioEnabled=!audioEnabled;localStorage.setItem("neon_audio",audioEnabled?"on":"off");syncAudio();if(audioEnabled)startAudio();toast(audioEnabled?"Áudio ativado":"Áudio silenciado");}
+function playSfx(kind="select"){
+ if(!audioEnabled)return;
+ try{
+  audioContext=audioContext||new (window.AudioContext||window.webkitAudioContext)();
+  const now=audioContext.currentTime,o=audioContext.createOscillator(),g=audioContext.createGain();
+  const table={select:[420,680,.055],turbo:[125,520,.22],hit:[95,48,.18],finish:[520,980,.45]};
+  const [from,to,duration]=table[kind]||table.select;o.type=kind==="hit"?"square":"sawtooth";o.frequency.setValueAtTime(from,now);o.frequency.exponentialRampToValueAtTime(Math.max(20,to),now+duration);
+  g.gain.setValueAtTime(.0001,now);g.gain.exponentialRampToValueAtTime(kind==="turbo"?.10:.065,now+.01);g.gain.exponentialRampToValueAtTime(.0001,now+duration);
+  o.connect(g).connect(audioContext.destination);o.start(now);o.stop(now+duration+.02);
+ }catch{}
+}
+function updateConnectionPill(online){const pill=document.querySelector(".server-pill");pill?.classList.toggle("online",online);if($("serverState"))$("serverState").textContent=online?"SERVIDOR ONLINE":"RECONECTANDO";}
+function boot(){
+ applyQualityClass();syncAudio();
+ const fill=$("bootFill"),text=$("bootText"),steps=[[22,"CARREGANDO INTERFACE..."],[56,"PREPARANDO PISTAS..."],[82,"SINCRONIZANDO PERFIL..."],[100,"PRONTO PARA CORRER"]];
+ steps.forEach(([pct,label],i)=>setTimeout(()=>{if(fill)fill.style.width=pct+"%";if(text)text.textContent=label;},160+i*230));
+ setTimeout(()=>$("bootSplash")?.classList.add("done"),1300);
+ if("serviceWorker" in navigator && location.protocol!=="file:")navigator.serviceWorker.register("/service-worker.js").catch(()=>{});
+}
+addEventListener("DOMContentLoaded",boot,{once:true});
+addEventListener("online",()=>{updateConnectionPill(socket.connected);toast("Conexão restaurada")});
+addEventListener("offline",()=>{updateConnectionPill(false);toast("Sem internet: tentando reconectar",3400)});
+addEventListener("pointerdown",()=>startAudio(),{once:true,passive:true});
 
 // ===== AUTO BUG RECOVERY / CEO REPORTING =====
 let bugRecoveryTimer=null, bugRecoverySeconds=15, lastBugFingerprint="", lastBugAt=0, recoveryAttempts=0;
@@ -64,7 +103,7 @@ async function reportBug(err,{source="client",message:msg,stack}={}){
   const fp=bugFingerprint(text,source), now=Date.now();
   if(fp===lastBugFingerprint && now-lastBugAt<15000)return;
   lastBugFingerprint=fp;lastBugAt=now;
-  try{await fetch("/api/bug-report",{method:"POST",headers:{"Content-Type":"application/json",...(authToken?{Authorization:"Bearer "+authToken}:{})},body:JSON.stringify({fingerprint:fp,message:text,stack:String(stack||err?.stack||"").slice(0,6000),source,screen:document.querySelector("#game:not(.hidden)")?"game":(document.querySelector(".screen:not(.hidden)")?.id||"unknown"),track:trackDef?.id||selectedTrack,mode:roomMode})});}catch{}
+  try{await fetch(API_BASE+"/api/bug-report",{method:"POST",headers:{"Content-Type":"application/json",...(authToken?{Authorization:"Bearer "+authToken}:{})},body:JSON.stringify({fingerprint:fp,message:text,stack:String(stack||err?.stack||"").slice(0,6000),source,screen:document.querySelector("#game:not(.hidden)")?"game":(document.querySelector(".screen:not(.hidden)")?.id||"unknown"),track:trackDef?.id||selectedTrack,mode:roomMode,quality:effectiveQuality(),viewport:`${innerWidth}x${innerHeight}`})});}catch{}
 }
 function showBugRecovery(title="OPS! O JOGO ENCONTROU UM PROBLEMA",text="O erro foi registrado automaticamente. O jogo vai tentar continuar com segurança."){
   const box=$("bugRecovery");if(!box)return;
@@ -97,13 +136,13 @@ function ceoKey(){return window.__ceoKey||sessionStorage.getItem("neon_ceo_key")
 function renderCEOReports(data){
  const box=$("ceoReports"), reports=data?.reports||[];
  if(!reports.length){box.innerHTML='<div class="ceo-empty">✓ Nenhum bug registrado ainda.</div>';return;}
- box.innerHTML=reports.map(r=>`<article class="bug-report ${r.resolved?"resolved":"open"}"><div class="bug-report-head"><b>${escapeHtml(r.message||"Erro")}</b><span>${r.resolved?"RESOLVIDO":"ABERTO"}</span></div><div class="bug-meta">${escapeHtml(r.nickname||"Piloto")} · ${escapeHtml(r.source||"client")} · ${escapeHtml(r.screen||"?")} · ${escapeHtml(r.track||"?")} · ${new Date(r.createdAt||Date.now()).toLocaleString("pt-BR")}</div><code>${escapeHtml((r.stack||r.fingerprint||"").slice(0,1400))}</code>${!r.resolved?`<button class="secondary-btn resolve-bug" data-bug-id="${r.id}">MARCAR RESOLVIDO</button>`:""}</article>`).join("");
- box.querySelectorAll(".resolve-bug").forEach(b=>b.onclick=async()=>{try{await fetch(`/api/ceo/bug-reports/${encodeURIComponent(b.dataset.bugId)}/resolve`,{method:"POST",headers:{"X-CEO-Key":ceoKey()}});loadCEOReports();}catch{}});
+ box.innerHTML=reports.map(r=>`<article class="bug-report ${r.resolved?"resolved":"open"}"><div class="bug-report-head"><b>${escapeHtml(r.message||"Erro")}</b><span>${r.resolved?"RESOLVIDO":"ABERTO"}</span></div><div class="bug-meta">${escapeHtml(r.nickname||"Piloto")} · ${escapeHtml(r.source||"client")} · ${escapeHtml(r.screen||"?")} · ${escapeHtml(r.track||"?")} · ${new Date(r.created_at||r.createdAt||Date.now()).toLocaleString("pt-BR")}</div><code>${escapeHtml((r.stack||r.fingerprint||"").slice(0,1400))}</code>${!r.resolved?`<button class="secondary-btn resolve-bug" data-bug-id="${r.id}">MARCAR RESOLVIDO</button>`:""}</article>`).join("");
+ box.querySelectorAll(".resolve-bug").forEach(b=>b.onclick=async()=>{try{await fetch(`${API_BASE}/api/ceo/bug-reports/${encodeURIComponent(b.dataset.bugId)}/resolve`,{method:"POST",headers:{"X-CEO-Key":ceoKey()}});loadCEOReports();}catch{}});
 }
 async function loadCEOReports(){
  const key=ceoKey(); if(!key){$("ceoReports").innerHTML='<div class="ceo-empty">Chave CEO não informada.</div>';return;}
  $("ceoReports").innerHTML='<div class="modal-muted">Carregando relatórios...</div>';
- try{const r=await fetch("/api/ceo/bug-reports",{headers:{"X-CEO-Key":key}});const d=await r.json();if(!r.ok)throw new Error(d.error||"Acesso negado");renderCEOReports(d);}catch(e){$("ceoReports").innerHTML=`<div class="ceo-empty">Não foi possível abrir os relatórios: ${escapeHtml(e.message)}</div>`;}
+ try{const r=await fetch(API_BASE+"/api/ceo/bug-reports",{headers:{"X-CEO-Key":key}});const d=await r.json();if(!r.ok)throw new Error(d.error||"Acesso negado");renderCEOReports(d);}catch(e){$("ceoReports").innerHTML=`<div class="ceo-empty">Não foi possível abrir os relatórios: ${escapeHtml(e.message)}</div>`;}
 }
 function openCEO(){
  const key=prompt("Chave CEO:",ceoKey()); if(!key)return; window.__ceoKey=key;sessionStorage.setItem("neon_ceo_key",key);$("ceoPanel").classList.remove("hidden");loadCEOReports();
@@ -165,63 +204,111 @@ addEventListener("fullscreenchange",()=>{
 });
 addEventListener("webkitfullscreenchange",()=>dispatchEvent(new Event("fullscreenchange")));
 addEventListener("orientationchange",()=>{setTimeout(resize,120);});
-$("rotateSkip")?.addEventListener("click",()=>{$("rotateNotice")?.classList.add("dismissed");sessionStorage.setItem("neon_rotate_skipped","1");resize();});
-if(sessionStorage.getItem("neon_rotate_skipped")==="1")$("rotateNotice")?.classList.add("dismissed");
+function maybeOfferLandscape(){
+ const portrait=isTouchDevice&&matchMedia("(orientation:portrait)").matches;
+ if(portrait&&sessionStorage.getItem("neon_portrait_ok")!=="1"&&!document.fullscreenElement)$("rotateNotice")?.classList.add("visible");
+}
 $("rotateFullscreen").onclick=async()=>{
   const ok=await requestFullscreenLandscape();
-  if(ok) $("rotateFullscreen").textContent="TELA CHEIA ATIVADA";
+  if(ok){$("rotateFullscreen").textContent="TELA CHEIA ATIVADA";$("rotateNotice").classList.remove("visible");}
 };
+const acceptPortrait=()=>{sessionStorage.setItem("neon_portrait_ok","1");$("rotateNotice")?.classList.remove("visible");setTimeout(resize,80);};
+$("rotateDismiss")?.addEventListener("click",acceptPortrait);
+$("portraitContinue")?.addEventListener("click",acceptPortrait);
 async function showTermsGate(){
- $("termsGate").classList.remove("hidden");$("termsAccept").checked=false;$("downloadResources").disabled=true;$("continueWithoutDownload").disabled=true;
- const cached=localStorage.getItem("neon_resources_v1")==="ready";
- if(cached){$("resourceStatus").textContent="Recursos já preparados neste dispositivo.";$("resourcePercent").textContent="100%";$("downloadResources").textContent="RECURSOS JÁ BAIXADOS";$("downloadResources").disabled=false;$("continueWithoutDownload").disabled=false;}
+ $("termsGate").classList.remove("hidden");$("termsAccept").checked=false;$("continueWithoutDownload").disabled=true;
+ setResourcePlan(selectedResourcePack);
+ const cached=localStorage.getItem(`neon_resources_v12_${selectedResourcePack}`)==="ready";
+ $("downloadResources").disabled=true;
+ if(cached){$("resourceStatus").textContent="Pacote já preparado neste dispositivo.";$("resourcePercent").textContent="100%";$("resourceFill").style.width="100%";$("downloadResources").textContent="PACOTE JÁ PREPARADO";}
+}
+function setResourcePlan(pack){
+ selectedResourcePack=pack==="hd"?"hd":"lite";localStorage.setItem("neon_resource_pack",selectedResourcePack);
+ document.querySelectorAll(".resource-plan").forEach(b=>{const active=b.dataset.pack===selectedResourcePack;b.classList.toggle("selected",active);b.setAttribute("aria-checked",String(active));});
+ if($("resourcePackName"))$("resourcePackName").textContent=selectedResourcePack==="hd"?"PACOTE HD":"PACOTE ESSENCIAL";
+ const cached=localStorage.getItem(`neon_resources_v12_${selectedResourcePack}`)==="ready";
+ if($("resourceStatus"))$("resourceStatus").textContent=cached?"Pacote já está pronto.":"Pronto para preparar.";
+ if($("resourcePercent"))$("resourcePercent").textContent=cached?"100%":"0%";
+ if($("resourceFill"))$("resourceFill").style.width=cached?"100%":"0%";
+ if($("termsAccept"))$("downloadResources").disabled=!$("termsAccept").checked;
+ $("continueWithoutDownload").disabled=!$("termsAccept")?.checked;
 }
 async function downloadGameResources(){
  if(!$("termsAccept").checked)return;
- $("downloadResources").disabled=true;$("resourceStatus").textContent="Baixando recursos essenciais...";
+ $("downloadResources").disabled=true;$("resourceStatus").textContent=`Preparando pacote ${selectedResourcePack==="hd"?"HD":"essencial"}...`;
  try{
   const manifest=await fetch("/assets-manifest.json",{cache:"no-store"}).then(r=>r.json());
-  const files=["style.css","app.js",...(manifest.hd_scenes||[]),...(manifest.portraits||[]),...(manifest.environment_textures||[]).slice(0,12),...(manifest.sky_billboards||[]).slice(0,2),...(manifest.arena_detail||[]).slice(0,4)];
-  const cache=await caches.open("neon-path-resources-v1");let done=0;
-  for(const file of files){try{await cache.add("/"+file)}catch{}done++;const pct=Math.round(done/files.length*100);$("resourcePercent").textContent=pct+"%";$("loadFill")?.style.setProperty("width",pct+"%");}
-  localStorage.setItem("neon_resources_v1","ready");$("resourceStatus").textContent=`Recursos preparados (${files.length} arquivos).`;$("resourcePercent").textContent="100%";$("continueWithoutDownload").disabled=false;$("downloadResources").textContent="RECURSOS PRONTOS";
- }catch(e){$("resourceStatus").textContent="Não foi possível preparar o cache. Você pode tentar novamente.";$("downloadResources").disabled=false;}
+  const lite=manifest.packs?.lite||["index.html","style.css","app.js","loading-hero.webp","loading-cinematic.mp4","velocity-protocol.mp3",...(manifest.portraits||[]).slice(0,2)];
+  const hd=manifest.packs?.hd||[...lite,...(manifest.hd_scenes||[]),...(manifest.portraits||[]),...(manifest.environment_textures||[]),...(manifest.sky_billboards||[]),...(manifest.arena_detail||[])];
+  const files=[...new Set(selectedResourcePack==="hd"?hd:lite)];
+  if(!("caches" in window))throw new Error("cache_unavailable");
+  const cache=await caches.open("neon-path-resources-v12");let cursor=0,done=0,failed=0;
+  const worker=async()=>{while(cursor<files.length){const index=cursor++,file=files[index];try{await cache.add(new Request(file.startsWith("/")?file:"/"+file,{cache:"reload"}));}catch{failed++;}done++;const pct=Math.round(done/files.length*100);$("resourcePercent").textContent=pct+"%";$("resourceFill").style.width=pct+"%";$("resourceStatus").textContent=`Preparando ${done} de ${files.length} recursos...`;}};
+  await Promise.all(Array.from({length:Math.min(3,files.length)},worker));
+  if(failed>Math.ceil(files.length*.35))throw new Error("many_assets_failed");
+  localStorage.setItem(`neon_resources_v12_${selectedResourcePack}`,"ready");$("resourceStatus").textContent=`Pacote pronto · ${files.length-failed} recursos armazenados.`;$("resourcePercent").textContent="100%";$("resourceFill").style.width="100%";$("continueWithoutDownload").disabled=false;$("downloadResources").textContent="PACOTE PRONTO";
+ }catch(e){$("resourceStatus").textContent="O cache não ficou disponível. A versão online continua funcionando.";$("downloadResources").disabled=false;$("continueWithoutDownload").disabled=false;reportBug(e,{source:"resource-pack"});}
 }
-$("termsAccept").onchange=()=>{$("downloadResources").disabled=!$("termsAccept").checked;};
+document.querySelectorAll(".resource-plan").forEach(b=>b.onclick=()=>setResourcePlan(b.dataset.pack));
+$("termsAccept").onchange=()=>{const accepted=$("termsAccept").checked;$("downloadResources").disabled=!accepted;$("continueWithoutDownload").disabled=!accepted;};
 $("downloadResources").onclick=downloadGameResources;
-$("continueWithoutDownload").onclick=async()=>{if(localStorage.getItem("neon_resources_v1")!=="ready")return;localStorage.setItem("neon_terms_v1","accepted");$("termsGate").classList.add("hidden");show("menu");};
+$("continueWithoutDownload").onclick=async()=>{localStorage.setItem("neon_terms_v12","accepted");$("termsGate").classList.add("hidden");show("menu");startAudio();};
 
+function xpForLevel(level){return Math.floor(100*Math.pow(1.12,Math.max(0,(Number(level)||1)-1)));}
+function prestigeTierFor(xp){let tier=PRESTIGE_TIERS[0];for(const t of PRESTIGE_TIERS)if(xp>=t.xp)tier=t;return tier;}
+function applyProfile(p){
+ if(!p)return;currentProfile=p;currentUser=p.nickname||currentUser;
+ const level=Math.max(1,Number(p.level)||1),xp=Math.max(0,Number(p.xp)||0),lifetimeXp=Math.max(xp,Number(p.lifetime_xp??p.lifetimeXp)||0),need=Math.max(1,Number(p.xp_needed)||xpForLevel(level));
+ const prestige=Math.max(0,Math.min(5,Number(p.prestige)||prestigeTierFor(lifetimeXp).level));
+ const savedTrack=TRACKS.find(t=>t.id===selectedTrack);if(savedTrack?.prestige&&prestige<savedTrack.prestige){selectedTrack='neon-city';localStorage.setItem('neon_track',selectedTrack);}
+ selectedCharacter=Math.max(1,Math.min(8,Number(p.character_id)||selectedCharacter||1));
+ $("menuNick").textContent=currentUser;$("menuLevel").textContent=level;$("levelLarge").textContent=level;$("menuPrestige").textContent=prestige;$("menuCoins").textContent=formatNumber(p.bruto_coins);
+ $("menuXpText").textContent=`${formatNumber(xp)} / ${formatNumber(need)} XP`;$("menuXp").style.width=Math.min(100,xp/need*100)+"%";
+ const tier=PRESTIGE_TIERS[prestige]||PRESTIGE_TIERS[0],next=PRESTIGE_TIERS[Math.min(5,prestige+1)];$("prestigeName").textContent=tier.name;$("prestigeProgressText").textContent=prestige>=5?"PRESTÍGIO MÁXIMO":`${formatNumber(lifetimeXp)} / ${formatNumber(next.xp)} XP`;
+ $("profileAvatar").textContent=currentUser.split(/\s+/).map(x=>x[0]).join("").slice(0,2).toUpperCase()||"NP";
+ const daily=Math.max(0,Math.min(3,Number(p.daily_races)||0));$("dailyMissionFill").style.width=daily/3*100+"%";$("dailyMissionText").textContent=`${daily}/3 · +450 ◉`;
+}
 function setAuthMode(mode){const login=mode==="login";$("loginForm").classList.toggle("hidden",!login);$("registerForm").classList.toggle("hidden",login);$("showLogin").classList.toggle("active",login);$("showRegister").classList.toggle("active",!login);$("authMsg").textContent="";}
 async function auth(mode){
  const nick=(mode==="login"?$("authNick"):$("registerNick")).value.trim(),pass=(mode==="login"?$("authPassword"):$("registerPassword")).value,email=mode==="register"?$("registerEmail").value.trim():"";
  if(!nick||!pass){$("authMsg").textContent="Preencha apelido e senha.";return}
+ const button=mode==="login"?$("loginBtn"):$("registerBtn"),oldText=button.textContent;button.disabled=true;button.textContent="CONECTANDO...";$("authMsg").textContent="";
  try{
   const body=mode==="register"?{username:nick,password:pass,email:email||null}:{username:nick,password:pass};
   const d=await api(mode==="register"?"/api/auth/register":"/api/auth/login",{method:"POST",body:JSON.stringify(body)});
   authToken=d.token;currentUser=d.nickname||nick;localStorage.setItem("neon_token",authToken);
-  enterApp();
- }catch(e){$("authMsg").textContent="Não foi possível entrar: "+e.message;}
+  if(socket.connected)socket.disconnect();socket.auth={token:authToken};socket.connect();
+  await enterApp();startAudio();playSfx("select");
+ }catch(e){$("authMsg").textContent="Não foi possível entrar: "+e.message;}finally{button.disabled=false;button.textContent=oldText;}
 }
 async function enterApp(){
+ try{const p=await api("/api/profile");applyProfile(p);}catch(e){if(e.status===401){authToken="";localStorage.removeItem("neon_token");$("authMsg").textContent="Sua sessão expirou. Entre novamente.";return;}throw e;}
  $("authPanel").hidden=true;$("app").hidden=false;
- try{const p=await api("/api/profile");currentUser=p.nickname||currentUser;$("menuNick").textContent=currentUser;$("menuLevel").textContent=p.level||1;$("menuCoins").textContent=(p.bruto_coins||0).toLocaleString("pt-BR");}catch{}
- if(localStorage.getItem("neon_terms_v1")!=="accepted") return showTermsGate();
+ if(localStorage.getItem("neon_terms_v12")!=="accepted") return showTermsGate();
  show("menu");
 }
 $("showLogin").onclick=()=>setAuthMode("login");$("showRegister").onclick=()=>setAuthMode("register");
 $("toRegister").onclick=()=>setAuthMode("register");$("toLogin").onclick=()=>setAuthMode("login");
 $("loginBtn").onclick=()=>auth("login");$("registerBtn").onclick=()=>auth("register");
+[$("authNick"),$("authPassword")].forEach(el=>el?.addEventListener("keydown",e=>{if(e.key==="Enter")auth("login")}));
+[$("registerNick"),$("registerPassword"),$("registerEmail")].forEach(el=>el?.addEventListener("keydown",e=>{if(e.key==="Enter")auth("register")}));
 setAuthMode("login");
-if(authToken)enterApp();
+if(authToken)enterApp().catch(()=>{$("authMsg").textContent="Não foi possível validar a sessão. Verifique a conexão.";});
 
 function renderCharacters(){
- $("characterSelect").innerHTML=CHARACTERS.map(c=>`<button class="character-card ${selectedCharacter===c.id?"selected":""}" data-char="${c.id}"><div class="avatar portrait-avatar"><img src="${c.portrait}" alt=""></div><b>${c.name}</b><small>${c.id===1?"INICIAL":"DESBLOQUEÁVEL"}</small></button>`).join("");
- document.querySelectorAll("[data-char]").forEach(b=>b.onclick=()=>{selectedCharacter=Number(b.dataset.char);renderCharacters();});
+ const explicit=new Map((currentProfile?.characters||[]).map(x=>[Number(x.character_id),!!x.unlocked])),level=Number(currentProfile?.level)||1;
+ const unlocked=c=>c.id===1||explicit.get(c.id)===true||level>=c.unlock;
+ $("characterSelect").innerHTML=CHARACTERS.map(c=>{const open=unlocked(c);return `<button class="character-card ${selectedCharacter===c.id?"selected":""} ${open?"":"locked"}" data-char="${c.id}" aria-pressed="${selectedCharacter===c.id}" aria-disabled="${!open}"><div class="avatar portrait-avatar"><img src="${c.portrait}" alt="Retrato de ${c.name}"></div><b>${c.name}</b><small>${open?c.rarity:`LIBERA NO LV ${c.unlock}`}</small>${open?"":'<span class="lock-badge">BLOQUEADO</span>'}</button>`}).join("");
+ document.querySelectorAll("[data-char]").forEach(b=>b.onclick=()=>{const c=CHARACTERS.find(x=>x.id===Number(b.dataset.char));if(!c||!unlocked(c)){toast(`Chegue ao nível ${c?.unlock||"necessário"} para liberar.`);return;}selectedCharacter=c.id;renderCharacters();playSfx("select");});
+ const c=CHARACTERS.find(x=>x.id===selectedCharacter)||CHARACTERS[0];$("selectedPortrait").innerHTML=`<img src="${c.portrait}" alt="${c.name}">`;$("selectedCharacterName").textContent=c.name;$("selectedCharacterRarity").textContent=c.rarity;
+ document.querySelectorAll("[data-stat]").forEach(el=>{el.style.setProperty("--stat",`${c.stats[Number(el.dataset.stat)]||50}%`)});
 }
 function openCharacters(){renderCharacters();show("select");}
 function renderTracks(){
- $("trackGrid").innerHTML=TRACKS.map(t=>`<button class="track-card ${selectedTrack===t.id?"selected":""}" data-track="${t.id}"><div class="track-art theme-${t.theme}"></div><b>${t.name}</b><small>${t.desc}</small></button>`).join("");
- document.querySelectorAll("[data-track]").forEach(b=>b.onclick=()=>{selectedTrack=b.dataset.track;renderTracks();});
+ const prestige=Math.max(0,Number(currentProfile?.prestige)||0);
+ $("trackGrid").innerHTML=TRACKS.map(t=>{const locked=t.prestige&&prestige<t.prestige;return `<button class="track-card ${selectedTrack===t.id?"selected":""} ${locked?'locked':''}" data-track="${t.id}" aria-disabled="${!!locked}"><div class="track-art theme-${t.theme}"></div><b>${t.name}</b><small>${locked?`BLOQUEADO · PRESTÍGIO ${t.prestige}`:t.desc}</small>${locked?'<span class="track-lock">PRESTÍGIO 5</span>':''}</button>`}).join("");
+ document.querySelectorAll("[data-track]").forEach(b=>b.onclick=()=>{const t=TRACKS.find(x=>x.id===b.dataset.track);if(t?.prestige&&prestige<t.prestige){toast(`Alcance o Prestígio ${t.prestige} para abrir este circuito.`);return;}selectedTrack=b.dataset.track;localStorage.setItem("neon_track",selectedTrack);renderTracks();playSfx("select");});
+ $("selectedTrackName").textContent=(TRACKS.find(t=>t.id===selectedTrack)||TRACKS[0]).name;
 }
 function openTracks(){renderTracks();show("tracks");}
 function openModes(){ $("modePanel").classList.remove("hidden"); }
@@ -233,16 +320,24 @@ function openPrivate(create=true){
  $("privateMsg").textContent="";
 }
 function closePrivate(){ $("privatePanel").classList.add("hidden"); }
-$("charactersBtn").onclick=openCharacters;$("mapsBtn").onclick=openTracks;
-$("selectBack").onclick=()=>show("menu");$("tracksBack").onclick=()=>show("select");
-$("selectContinue").onclick=()=>openTracks();
-$("trackReady").onclick=()=>{ if(pendingAction==="solo") beginRoom(false,true); else if(pendingAction==="ceo") beginRoom(true,false); };
-$("playQuick").onclick=openModes;
+$("charactersBtn").onclick=()=>{pendingAction="customize";openCharacters();};$("mapsBtn").onclick=()=>{pendingAction="preview";openTracks();};
+$("selectBack").onclick=()=>show("menu");$("tracksBack").onclick=()=>pendingAction==="preview"?show("menu"):show("select");
+$("selectContinue").onclick=async()=>{if(pendingAction==="customize"){try{const p=await api("/api/profile/character",{method:"POST",body:JSON.stringify({characterId:selectedCharacter})});applyProfile(p);toast("Piloto equipado");}catch(e){toast("Não foi possível equipar: "+e.message);}show("menu");return;}openTracks();};
+$("trackReady").onclick=()=>{
+ localStorage.setItem("neon_track",selectedTrack);maybeOfferLandscape();
+ if(pendingAction==="solo")beginRoom(false,true);
+ else if(pendingAction==="online")beginMatchmaking();
+ else if(pendingAction==="ceo")beginRoom(true,false);
+ else if(pendingAction==="create")beginRoom(false,false);
+ else {show("menu");toast("Pista favorita salva");}
+};
+$("playQuick").onclick=()=>{startAudio();openModes();};
 $("soloBtn").onclick=openModes;
 $("create").onclick=()=>openPrivate(true);
 $("join").onclick=()=>openPrivate(false);
 $("modeClose").onclick=closeModes;
 $("modeSolo").onclick=()=>{closeModes();pendingAction="solo";openCharacters();};
+$("modeOnline").onclick=()=>{closeModes();pendingAction="online";openCharacters();};
 $("modePrivate").onclick=()=>{closeModes();openPrivate(true);};
 $("modeJoin").onclick=()=>{closeModes();openPrivate(false);};
 $("privateClose").onclick=closePrivate;
@@ -264,16 +359,24 @@ $("privateJoinBtn").onclick=()=>{
 $("ceoBtn").onclick=()=>openCEO();
 async function beginRoom(ceo=false,forceSolo=false){
  currentUser=$("menuNick").textContent||currentUser;
+ if(!socket.connected){toast("Servidor reconectando. Tente novamente em instantes.");show("menu");return;}
  if(ceo||pendingAction==="ceo") socket.emit("room:create",{nickname:currentUser,ceo:true,key:window.__ceoKey,track:selectedTrack,characterId:selectedCharacter});
  else if(forceSolo||pendingAction==="solo") socket.emit("room:create",{nickname:currentUser,ceo:false,track:selectedTrack,mode:"solo",characterId:selectedCharacter});
  else { const pr=window.__privateRoom||{}; socket.emit("room:create",{nickname:currentUser,ceo:false,track:selectedTrack,mode:"room",roomName:pr.name,password:pr.password,characterId:selectedCharacter}); }
 }
-function renderLobby(s){
- $("roomCode").textContent=s.code;$("roomName").textContent=s.roomName?`NOME: ${escapeHtml(s.roomName)}`:"";$("lobbyTrack").textContent=s.trackName||"NEON CITY";
- $("players").innerHTML=(s.players||[]).map((p,i)=>`<div class="p" style="--c:${p.color}"><span><b>${i+1}</b> ${escapeHtml(p.nickname)}</span><strong>${p.alive?"PRONTO":"FORA"}</strong></div>`).join("");
+function beginMatchmaking(){
+ currentUser=$("menuNick").textContent||currentUser;
+ if(!socket.connected){toast("Servidor reconectando. Tente novamente em instantes.");show("menu");return;}
+ show("lobby");$("lobbyMode").textContent="MATCHMAKING GLOBAL";$("roomCode").textContent="BUSCANDO";$("roomName").textContent="Encontrando rivais do seu nível...";$("start").classList.add("hidden");$("players").innerHTML="";
+ socket.emit("room:matchmake",{nickname:currentUser,track:selectedTrack,characterId:selectedCharacter});
 }
-socket.on("connect",()=>message("SERVIDOR ONLINE"));
-socket.on("connect_error",()=>message("Conexão instável — tentando novamente..."));
+function renderLobby(s){
+ $("roomCode").textContent=s.code||"------";$("roomName").textContent=s.roomName?`NOME: ${s.roomName}`:"";$("lobbyTrack").textContent=(TRACKS.find(t=>t.id===s.track)?.name)||s.trackName||"NEON APEX";
+ $("players").innerHTML=(s.players||[]).map((p,i)=>`<div class="player" data-seat="${i+1}" style="--c:${p.color}"><span><b>${escapeHtml(p.nickname)}</b><small>${p.finish?`${p.finish}º LUGAR`:p.alive?"PRONTO":"FORA"}</small></span><strong style="color:${p.color}">●</strong></div>`).join("");
+}
+socket.on("connect",()=>{updateConnectionPill(true);message("SERVIDOR ONLINE");});
+socket.on("disconnect",()=>{updateConnectionPill(false);message("Reconectando ao servidor...");});
+socket.on("connect_error",error=>{updateConnectionPill(false);if(error?.message==='unauthorized'){logout(false);$("authMsg").textContent="Sua sessão expirou. Entre novamente.";}else message("Conexão instável — tentando novamente...");});
 socket.on("error:game",x=>{const text=typeof x==="string"?x:(x?.message||x?.error||"Erro na partida");if($("lobbyMsg"))$("lobbyMsg").textContent=text;if($("privateMsg")&&!$("privatePanel").classList.contains("hidden"))$("privateMsg").textContent=text;message(text);});
 socket.on("room",x=>{
  roomMode=x.mode||"room";
@@ -284,9 +387,9 @@ socket.on("room",x=>{
    return;
  }
  show("lobby");
- $("lobbyMode").textContent=x.ceo?"CEO • SALA PRIVADA":"SALA PRIVADA";
+ $("lobbyMode").textContent=x.mode==="public"?"MATCHMAKING GLOBAL":x.ceo?"CEO · SALA PRIVADA":"SALA PRIVADA";
  renderLobby({code:x.code,roomName:x.roomName,trackName:TRACKS.find(t=>t.id===x.track)?.name||x.track,players:[]});
- $("start").classList.toggle("hidden",!x.canStart);
+ $("start").classList.toggle("hidden",!x.canStart||x.mode==="public");
  $("ceoTools").classList.toggle("hidden",!x.ceo);
  $("ceoTrack").innerHTML=TRACKS.map(t=>`<option value="${t.id}" ${t.id===x.track?"selected":""}>${t.name}</option>`).join("");
 });
@@ -296,15 +399,14 @@ $("ceoTrack").onchange=e=>socket.emit("room:track",e.target.value);
 $("back").onclick=()=>{socket.emit("room:leave");show("menu");};
 socket.on("race:loading",()=>{ const id=lastState?.track||selectedTrack; showLoading(id); armRaceStartWatchdog(id); });
 socket.on("race:countdown",x=>{
- requestFullscreenLandscape();
  const el=$("countdown"); if(!el)return;
  el.classList.remove("hidden"); el.textContent=x.value==='GO'?'GO':String(x.value);
  el.classList.toggle('go',x.value==='GO');
  if(x.value==='GO')setTimeout(()=>el.classList.add('hidden'),700);
 });
-socket.on("start",x=>{ disarmRaceStartWatchdog(); requestFullscreenLandscape().catch?.(()=>{}); startGame(x.track); });
-socket.on("hit",x=>showHit(x));
-socket.on("race:finish",x=>showFinish(x.results,x.track));
+socket.on("start",x=>{disarmRaceStartWatchdog();startGame(x.track);});
+socket.on("hit",x=>{playSfx("hit");showHit(x)});
+socket.on("race:finish",x=>showFinish(x.results,x.track,x.rewards,x.profile));
 
 function armRaceStartWatchdog(id){
  clearTimeout(raceStartWatchdog);
@@ -321,15 +423,17 @@ function showLoading(id){
  if(loadingTimer){clearInterval(loadingTimer);loadingTimer=null;}
  const t=TRACKS.find(x=>x.id===id)||TRACKS[0];
  $("loadingTitle").textContent=t.name;
- $("loadingSub").textContent="CARREGANDO PISTA...";
+ $("loadingWorld").textContent=t.world||"MUNDO";$("loadingSub").textContent="SINCRONIZANDO PISTA E PILOTOS...";
  $("loadFill").style.width="8%";
+ $("loadingPercent").textContent="8%";
  show("loading");
+ const video=$("loadingVideo");if(video&&!matchMedia("(prefers-reduced-motion:reduce)").matches&&effectiveQuality()!=="low"){video.currentTime=0;video.play().catch(()=>{});}
  let n=8;
- const tip=["Montando chão e asfalto...","Aplicando iluminação...","Carregando cenário...","Preparando pilotos...","Otimizando sombras...","Tudo pronto!"];
+ const tip=["Solte o DRIFT quando o brilho chegar ao máximo.","Pegue a linha interna, mas proteja seu turbo.","No celular, segure ACELERAR para ganhar velocidade.","O servidor valida posição, XP e moedas.","Mapas HD são carregados somente quando necessários.","Prestígio vem de XP conquistado nas corridas."];
  let i=0;
- loadingTimer=setInterval(()=>{n=Math.min(94,n+Math.random()*8);$("loadFill").style.width=n+"%";$("loadTip").textContent="DICA: "+tip[i++%tip.length];},180);
+ loadingTimer=setInterval(()=>{n=Math.min(94,n+2+Math.random()*4);const pct=Math.round(n);$("loadFill").style.width=pct+"%";$("loadingPercent").textContent=pct+"%";if(i%4===0)$("loadTip").textContent="DICA: "+tip[(i/4|0)%tip.length];i++;},220);
 }
-function showHit(x){const el=document.createElement("div");el.textContent=`⚡ ${x.from} acertou ${x.to}`;el.style.cssText="position:fixed;top:20%;left:50%;transform:translateX(-50%);z-index:20;font-weight:1000;color:#ffe600;text-shadow:0 0 20px #ff8c00";document.body.appendChild(el);setTimeout(()=>el.remove(),900);}
+function showHit(x){const el=document.createElement("div");el.textContent=`IMPACTO · ${x.from} → ${x.to}`;el.style.cssText="position:fixed;top:20%;left:50%;transform:translateX(-50%) skewX(-8deg);z-index:120;font-weight:1000;color:#ffe600;background:#080b16d9;border:1px solid #ffe60055;padding:10px 16px;border-radius:8px;text-shadow:0 0 20px #ff8c00;pointer-events:none";document.body.appendChild(el);setTimeout(()=>el.remove(),900);}
 
 function setupRenderer(){
  const oldCanvas=$("scene");
@@ -337,14 +441,10 @@ function setupRenderer(){
  if(renderer){try{renderer.dispose();}catch{} oldCanvas.replaceWith(oldCanvas.cloneNode(false));}
  const canvas=$("scene");
  const q=effectiveQuality();
- renderer=new THREE.WebGLRenderer({canvas,antialias:q!=="low",powerPreference:"high-performance",alpha:false,stencil:false,depth:true,preserveDrawingBuffer:false});
- adaptiveScale=1;
- const rect=canvas.getBoundingClientRect();
- const w=Math.max(320,Math.round(rect.width||innerWidth)),h=Math.max(180,Math.round(rect.height||innerHeight));
- const baseDpr=q==="low"?.72:q==="medium"?.95:q==="high"?Math.min(devicePixelRatio||1,1.5):Math.min(devicePixelRatio||1,1.1);
- renderer.userData.baseDpr=baseDpr;
- renderer.setPixelRatio(baseDpr);
- renderer.setSize(w,h,false); lastCanvasW=w;lastCanvasH=h;
+ renderer=new THREE.WebGLRenderer({canvas,antialias:q!=="low",powerPreference:q==="low"?"default":"high-performance",alpha:false,stencil:false,depth:true,preserveDrawingBuffer:false,failIfMajorPerformanceCaveat:false});
+ const dpr=q==="low"?.72:q==="medium"?.95:q==="high"?Math.min(devicePixelRatio||1,1.5):Math.min(devicePixelRatio||1,1.1);
+ renderer.setPixelRatio(dpr);
+ renderer.setSize(innerWidth,innerHeight,false);
  renderer.outputColorSpace=THREE.SRGBColorSpace;
  renderer.toneMapping=THREE.ACESFilmicToneMapping;
  renderer.toneMappingExposure=q==="high"?1.12:1.0;
@@ -352,7 +452,7 @@ function setupRenderer(){
  renderer.shadowMap.type=THREE.PCFSoftShadowMap;
  canvas.addEventListener("webglcontextlost",e=>{e.preventDefault();gameRunning=false;show("loading");$("loadingTitle").textContent="RECUPERANDO GRÁFICOS";$("loadingSub").textContent="REINICIANDO O MOTOR 3D...";setTimeout(()=>startGame(trackDef?.id||selectedTrack),250);},{passive:false});
  scene=new THREE.Scene();
- camera=new THREE.PerspectiveCamera(64,w/h,.08,520);
+ camera=new THREE.PerspectiveCamera(64,innerWidth/innerHeight,.08,520);
  clock=new THREE.Clock();
 }
 function mat(c,rough=.75,metal=0,em=0){
@@ -380,7 +480,7 @@ function addBillboard(group,url,x,z,w=9,h=5){
  return s;
 }
 function addBackdrop(t){
- const path=`/${t.id}.svg`;
+ const path=t.id==='immortal-grid'?'/prestige-emblem.webp':`/${t.id}.svg`;
  const spriteMat=new THREE.SpriteMaterial({color:0xffffff,transparent:true,opacity:.94,depthWrite:false,fog:false});
  trackBackdrop=new THREE.Sprite(spriteMat);trackBackdrop.position.set(0,34,0);trackBackdrop.scale.set(210,118,1);scene.add(trackBackdrop);
  backdropPromise=new Promise(resolve=>trackTextureLoader.load(path,tex=>{tex.colorSpace=THREE.SRGBColorSpace;spriteMat.map=tex;spriteMat.needsUpdate=true;resolve(true)},undefined,()=>resolve(false)));
@@ -475,9 +575,9 @@ function buildEnvironment(t,rx,rz){
  // Far scenery: always visible even when a remote SVG texture fails. This is geometry, not a baked image.
  const sky=new THREE.Mesh(new THREE.SphereGeometry(240,32,18),new THREE.MeshBasicMaterial({color:t.colors[0],side:THREE.BackSide,depthWrite:false,fog:false}));environmentGroup.add(sky);
  const sun=new THREE.Mesh(new THREE.SphereGeometry(10,20,12),new THREE.MeshBasicMaterial({color:t.colors[1],transparent:true,opacity:.85,depthWrite:false}));sun.position.set(-75,75,-125);environmentGroup.add(sun);
- const farGround=addBox(environmentGroup,0,-.05,0,235,.25,195,t.theme==='desert'?0x9f6a31:t.theme==='ice'?0x75b8d5:t.theme==='jungle'?0x145b38:t.theme==='volcano'?0x2a1012:t.theme==='space'?0x080b16:0x17402f);farGround.receiveShadow=true;
+ const farGround=addBox(environmentGroup,0,-.05,0,235,.25,195,t.theme==='desert'?0x9f6a31:t.theme==='ice'?0x75b8d5:t.theme==='jungle'?0x145b38:t.theme==='volcano'?0x2a1012:t.theme==='space'?0x080b16:t.theme==='immortal'?0x0a0618:0x17402f);farGround.receiveShadow=true;
  // Layered hills make the world read as a real place instead of an empty plane.
- const hillColor=t.theme==='desert'?0xc88a45:t.theme==='ice'?0x9ed8e9:t.theme==='jungle'?0x0c4f32:t.theme==='volcano'?0x3a1718:t.theme==='space'?0x10132d:0x163b55;
+ const hillColor=t.theme==='desert'?0xc88a45:t.theme==='ice'?0x9ed8e9:t.theme==='jungle'?0x0c4f32:t.theme==='volcano'?0x3a1718:t.theme==='space'?0x10132d:t.theme==='immortal'?0x24113e:0x163b55;
  for(let i=0;i<18;i++){
   const side=i%2?-1:1, z=-105+i*12+(i%3)*3, x=side*(58+(i%4)*9);
   const h=10+(i%5)*4,w=13+(i%4)*4;
@@ -500,19 +600,19 @@ function buildEnvironment(t,rx,rz){
   for(let i=0;i<42;i++){const side=i%2?-1:1,x=side*(38+(i%9)*4),z=-112+i*6;addTree(environmentGroup,x,z,i%3?0x147344:0x0b5b36,1+(i%4)*.12);if(i%4===0)addBush(environmentGroup,x+side*2,z+3,.8);}
  } else if(t.theme==='volcano'){
   for(let i=0;i<28;i++){const side=i%2?-1:1,x=side*(40+(i%7)*5),z=-110+i*8,h=6+(i%5)*2;const m=new THREE.Mesh(new THREE.ConeGeometry(2.4+(i%3),h,7),mat(i%2?0x2a1518:0x171017,.98,0));m.position.set(x,h/2,z);m.castShadow=effectiveQuality()!=='low';environmentGroup.add(m);if(i%5===0)addLamp(environmentGroup,x,z,0xff4d00);}
- } else if(t.theme==='space'){
-  const starCount=effectiveQuality()==='low'?90:180;for(let i=0;i<starCount;i++){const s=new THREE.Mesh(new THREE.SphereGeometry(.08+(i%3)*.03,6,4),new THREE.MeshBasicMaterial({color:i%5?0x9edbff:0xff55dd}));s.position.set((i*37%190)-95,15+(i*17%75),(i*29%170)-85);environmentGroup.add(s);}
+ } else if(t.theme==='space'||t.theme==='immortal'){
+  const starCount=effectiveQuality()==='low'?90:180;for(let i=0;i<starCount;i++){const s=new THREE.Mesh(new THREE.SphereGeometry(.08+(i%3)*.03,6,4),new THREE.MeshBasicMaterial({color:t.theme==='immortal'?(i%5?0xffd45f:0x8b5cff):(i%5?0x9edbff:0xff55dd)}));s.position.set((i*37%190)-95,15+(i*17%75),(i*29%170)-85);environmentGroup.add(s);}
  } else if(t.theme==='ice'){
   for(let i=0;i<28;i++){const side=i%2?-1:1,x=side*(38+(i%7)*5),z=-110+i*8;addRock(environmentGroup,x,z,.9+(i%3)*.25,i%2?0xc7f5ff:0x8fc8e5);}
   for(let i=0;i<10;i++)addCloud(environmentGroup,-90+i*20,30+(i%3)*5,-100+i*12,1.1);
  }
  // Decorative roadside strips: flowers/rocks/bushes keep the track edges from looking dead.
- if(t.theme!=='space')for(let i=0;i<34;i++){const a=i/34*Math.PI*2,side=i%2?-1:1;const x=(rx+12+((i*7)%8))*Math.sin(a),z=(rz+12+((i*5)%7))*Math.cos(a);if(i%3===0)addRock(environmentGroup,x,z,.45);else addBush(environmentGroup,x,z,.42,t.theme==='ice'?0x64b6ca:t.theme==='desert'?0x6f8d35:0x18864c);}
+ if(t.theme!=='space'&&t.theme!=='immortal')for(let i=0;i<34;i++){const a=i/34*Math.PI*2,side=i%2?-1:1;const x=(rx+12+((i*7)%8))*Math.sin(a),z=(rz+12+((i*5)%7))*Math.cos(a);if(i%3===0)addRock(environmentGroup,x,z,.45);else addBush(environmentGroup,x,z,.42,t.theme==='ice'?0x64b6ca:t.theme==='desert'?0x6f8d35:0x18864c);}
 }
 function buildTrack(t){
  worldGroup=new THREE.Group();scene.add(worldGroup);
  const q=effectiveQuality(),rx=t.rx||48,rz=t.rz||28,theme=t.theme;
- const groundColor=theme==='desert'?0xb97935:theme==='ice'?0x8fc9e4:theme==='volcano'?0x241015:theme==='space'?0x050716:theme==='jungle'?0x0b3d25:theme==='pirate'?0x285e55:0x102b2b;
+ const groundColor=theme==='desert'?0xb97935:theme==='ice'?0x8fc9e4:theme==='volcano'?0x241015:theme==='space'?0x050716:theme==='immortal'?0x090515:theme==='jungle'?0x0b3d25:theme==='pirate'?0x285e55:0x102b2b;
  const ground=addBox(worldGroup,0,-.9,0,230,1.2,190,groundColor);ground.receiveShadow=true;
  buildEnvironment(t,rx,rz);
  // Broad, banked ribbon: avoids the old flat/white slab perspective and gives the camera a readable racing surface.
@@ -548,16 +648,22 @@ function buildTrack(t){
   for(let i=0;i<count+(theme==='jungle'?10:0);i++){const side=i%2?-1:1;addTree(worldGroup,side*(39+Math.random()*28),(Math.random()-.5)*130,theme==='jungle'?(i%2?0x147344:0x0c4f31):0x185b3b,.9+Math.random()*.6);}
  } else if(theme==='volcano'){
   for(let i=0;i<count;i++){const side=i%2?-1:1,x=side*(39+Math.random()*30),z=(Math.random()-.5)*130,h=5+Math.random()*12;const m=new THREE.Mesh(new THREE.ConeGeometry(2+Math.random()*4,h,8),mat(i%2?0x351a18:0x111018));m.position.set(x,h/2,z);m.castShadow=q!=='low';worldGroup.add(m);if(i%4===0)addLamp(worldGroup,x,z,0xff4d00);}
- } else if(theme==='space'){
-  for(let i=0;i<(q==='low'?55:q==='medium'?85:120);i++){const s=new THREE.Mesh(new THREE.SphereGeometry(.08,6,4),new THREE.MeshBasicMaterial({color:i%4?0x7fbfff:0xff55dd}));s.position.set((Math.random()-.5)*200,12+Math.random()*75,(Math.random()-.5)*160);worldGroup.add(s);}
+ } else if(theme==='space'||theme==='immortal'){
+  for(let i=0;i<(q==='low'?55:q==='medium'?85:120);i++){const s=new THREE.Mesh(new THREE.SphereGeometry(.08,6,4),new THREE.MeshBasicMaterial({color:theme==='immortal'?(i%4?0xffd45f:0x8b5cff):(i%4?0x7fbfff:0xff55dd)}));s.position.set((Math.random()-.5)*200,12+Math.random()*75,(Math.random()-.5)*160);worldGroup.add(s);}
  } else if(theme==='ice'){
   for(let i=0;i<count;i++){const side=i%2?-1:1,x=side*(39+Math.random()*27),z=(Math.random()-.5)*130,h=5+Math.random()*9;const m=new THREE.Mesh(new THREE.ConeGeometry(2+Math.random()*3,h,6),mat(0xc9f6ff,.25,.05));m.position.set(x,h/2,z);m.castShadow=q!=='low';worldGroup.add(m);}
  }
- if(theme!=='space'&&theme!=='volcano')for(let i=0;i<(q==='low'?8:16);i++){const a=i/16*Math.PI*2;addTree(worldGroup,(rx*.55)*Math.sin(a),(rz*.55)*Math.cos(a),theme==='ice'?0x91d9ec:theme==='desert'?0x7c5a2b:0x1c7b46,.65+Math.random()*.3);}
+ if(theme!=='space'&&theme!=='immortal'&&theme!=='volcano')for(let i=0;i<(q==='low'?8:16);i++){const a=i/16*Math.PI*2;addTree(worldGroup,(rx*.55)*Math.sin(a),(rz*.55)*Math.cos(a),theme==='ice'?0x91d9ec:theme==='desert'?0x7c5a2b:0x1c7b46,.65+Math.random()*.3);}
+ // Arcade dressing: luminous gates, banners and spectator blocks make every lap feel inhabited.
+ for(let i=0;i<(q==='low'?6:12);i++){const a=i/(q==='low'?6:12)*Math.PI*2,x=(rx+13)*Math.sin(a),z=(rz+10)*Math.cos(a);addLamp(worldGroup,x,z,i%2?t.colors[1]:0x00eaff);}
+ for(let i=0;i<(q==='low'?4:8);i++){const a=(i+.5)/(q==='low'?4:8)*Math.PI*2,x=(rx+19)*Math.sin(a),z=(rz+15)*Math.cos(a);const stand=addBox(worldGroup,x,2.1,z,7,4,3,i%2?0x17234a:0x2c164b);stand.rotation.y=-a;for(let r=0;r<3;r++)for(let c=0;c<5;c++){const dot=new THREE.Mesh(new THREE.SphereGeometry(.11,6,4),new THREE.MeshBasicMaterial({color:[0xffd84a,0x38d9ff,0xff5fb4,0x7cff58][(r+c+i)%4]}));dot.position.set(x+(c-2)*.55,2.3+r*.55,z);worldGroup.add(dot);}}
 }
-function buildVehicle(c){
+function safeCosmeticColor(value,fallback){return typeof value==='string'&&/^#[0-9a-f]{6}$/i.test(value)?parseInt(value.slice(1),16):fallback;}
+function buildVehicle(c,equipped=[]){
  const q=effectiveQuality(),g=new THREE.Group();
+ const cosmetics=Array.isArray(equipped)?equipped.slice(0,8):[],findType=type=>cosmetics.find(x=>x?.type===type),kart=findType('kart'),trail=findType('trail'),crown=findType('crown'),aura=findType('aura'),back=findType('back');
  const body=addBox(g,0,.62,0,2.8,.55,3.55,c.color,.05);body.scale.set(1,.92,1);body.castShadow=true;
+ if(kart)body.material.color.setHex(safeCosmeticColor(kart.data?.accent,c.color));
  const nose=new THREE.Mesh(new THREE.SphereGeometry(1,24,16),mat(0x111827,.32,.5));nose.scale.set(1.3,.32,.95);nose.position.set(0,.55,-1.65);nose.castShadow=true;g.add(nose);
  const sideA=addBox(g,-1.45,.62,0,.22,.48,2.45,0x101725,.5),sideB=addBox(g,1.45,.62,0,.22,.48,2.45,0x101725,.5);sideA.castShadow=sideB.castShadow=true;
  const cockpit=new THREE.Mesh(new THREE.SphereGeometry(.82,24,16),mat(0x07101d,.08,.7));cockpit.scale.set(.82,.55,.95);cockpit.position.set(0,1.12,.18);cockpit.castShadow=true;g.add(cockpit);
@@ -565,12 +671,14 @@ function buildVehicle(c){
  const helmet=new THREE.Mesh(new THREE.SphereGeometry(.57,24,16),mat(c.color,.24,.4));helmet.scale.y=.68;helmet.position.set(0,1.86,.18);helmet.castShadow=true;g.add(helmet);
  const visor=new THREE.Mesh(new THREE.SphereGeometry(.35,16,10),new THREE.MeshStandardMaterial({color:0x06101c,metalness:.85,roughness:.06,emissive:new THREE.Color(c.color),emissiveIntensity:.22}));visor.scale.set(1.38,.6,.18);visor.position.set(0,1.86,-.29);g.add(visor);
  const spoiler=addBox(g,0,1.25,1.55,3.0,.16,.35,0x101827,.2);spoiler.castShadow=true;addBox(g,0,.98,1.48,.18,.68,.18,0x20293a);
- const wheels=[];
- for(const x of [-1.52,1.52])for(const z of [-1.15,1.15]){const wg=new THREE.Group();wg.position.set(x,.43,z);const w=new THREE.Mesh(new THREE.CylinderGeometry(.5,.5,.45,24),mat(0x0b1018,.94,0));w.rotation.z=Math.PI/2;w.castShadow=true;wg.add(w);const hub=new THREE.Mesh(new THREE.CylinderGeometry(.18,.18,.46,16),mat(0xb7c2d5,.25,.72));hub.rotation.z=Math.PI/2;wg.add(hub);g.add(wg);wheels.push({group:wg,wheel:w,front:z<0});}
+ const wheels=[];for(const x of [-1.52,1.52])for(const z of [-1.15,1.15]){const w=new THREE.Mesh(new THREE.CylinderGeometry(.5,.5,.45,24),mat(0x0b1018,.94,0));w.rotation.z=Math.PI/2;w.position.set(x,.43,z);w.castShadow=true;g.add(w);wheels.push(w);const hub=new THREE.Mesh(new THREE.CylinderGeometry(.18,.18,.46,16),mat(0xb7c2d5,.25,.72));hub.rotation.z=Math.PI/2;hub.position.set(x,.43,z);g.add(hub);}
  for(const x of [-.72,.72]){const light=new THREE.Mesh(new THREE.SphereGeometry(.16,12,8),new THREE.MeshBasicMaterial({color:0xffffff}));light.position.set(x,.82,-1.92);g.add(light);}
- const exhaust=[];for(const x of [-.62,.62]){const flame=new THREE.Mesh(new THREE.ConeGeometry(.2,.95,10),new THREE.MeshBasicMaterial({color:c.color,transparent:true,opacity:.9}));flame.rotation.x=-Math.PI/2;flame.position.set(x,.5,2.05);flame.visible=false;g.add(flame);exhaust.push(flame);}
- const glow=new THREE.PointLight(c.color,q==='low'?0:1.2,8);glow.position.y=.6;g.add(glow);
- g.scale.setScalar(1.12);g.userData={character:c.id,exhaust,wheels,baseScale:1.12,bobSeed:Math.random()*10};return g;
+ const trailColor=safeCosmeticColor(trail?.data?.color,c.color),exhaust=[];for(const x of [-.62,.62]){const flame=new THREE.Mesh(new THREE.ConeGeometry(.2,.95,10),new THREE.MeshBasicMaterial({color:trailColor,transparent:true,opacity:.9}));flame.rotation.x=-Math.PI/2;flame.position.set(x,.5,2.05);flame.visible=false;g.add(flame);exhaust.push(flame);}
+ if(crown){const crownColor=safeCosmeticColor(crown.data?.color||crown.data?.glow,0xffd45f),ring=new THREE.Mesh(new THREE.TorusGeometry(.48,.09,8,20),new THREE.MeshStandardMaterial({color:crownColor,emissive:crownColor,emissiveIntensity:.7,metalness:.65,roughness:.24}));ring.rotation.x=Math.PI/2;ring.position.y=2.52;g.add(ring);for(let i=0;i<5;i++){const spike=new THREE.Mesh(new THREE.ConeGeometry(.09,.42,6),ring.material);const a=i/5*Math.PI*2;spike.position.set(Math.sin(a)*.4,2.75,Math.cos(a)*.4);g.add(spike);}}
+ if(aura){const auraColor=safeCosmeticColor(aura.data?.color,0x8b5cff),halo=new THREE.Mesh(new THREE.TorusGeometry(1.82,.055,8,36),new THREE.MeshBasicMaterial({color:auraColor,transparent:true,opacity:.72}));halo.rotation.x=Math.PI/2;halo.position.y=.28;g.add(halo);}
+ if(back){const wingColor=safeCosmeticColor(back.data?.color,0xffd45f);for(const side of [-1,1]){const wing=addBox(g,side*1.25,1.25,1.05,1.15,.12,.72,wingColor,.75);wing.rotation.z=side*.42;wing.rotation.y=side*.18;}}
+ const glowColor=aura?safeCosmeticColor(aura.data?.color,c.color):trailColor,glow=new THREE.PointLight(glowColor,q==='low'?0:1.2,8);glow.position.y=.6;g.add(glow);
+ g.scale.setScalar(1.12);g.userData={character:c.id,exhaust,wheels,baseScale:1.12};return g;
 }
 function buildParticles(){
  const q=effectiveQuality(),n=q==="low"?70:q==="medium"?120:190;const geo=new THREE.BufferGeometry(),a=new Float32Array(n*3);
@@ -612,7 +720,7 @@ async function startGame(id,{watchdog=false}={}){
  try{
   disarmRaceStartWatchdog();
   if(loadingTimer){clearInterval(loadingTimer);loadingTimer=null;}
-  gameRunning=false;playerMeshes.clear();trackDef=TRACKS.find(t=>t.id===id)||TRACKS[0];
+  gameRunning=false;playerMeshes.clear();trackDef=TRACKS.find(t=>t.id===id)||TRACKS[0];adaptiveReduced=false;frameBudgetStarted=performance.now();frameBudgetCount=0;
   showLoading(trackDef.id);
   const loadingStarted=performance.now();
   setupRenderer();
@@ -632,10 +740,11 @@ async function startGame(id,{watchdog=false}={}){
  clearTimeout(slowTimer);
  const elapsed=performance.now()-loadingStarted;
  if(elapsed<450)await new Promise(r=>setTimeout(r,450-elapsed));
- $('loadFill').style.width='100%';
- show('game');
+ $('loadFill').style.width='100%';$('loadingPercent').textContent='100%';document.querySelector('.loading-shell')?.classList.remove('slow');$('loadingVideo')?.pause();
+ show('game');startAudio();
   lastRaceStart=Date.now();
   lastFrameTime=performance.now();
+  gameRunning=true;
   animate();
   raceStarting=false;
  }catch(err){
@@ -662,27 +771,29 @@ async function startGame(id,{watchdog=false}={}){
   }
  }}
 function updateCars(s,dt=.016){
- const sorted=[...s.players].sort((a,b)=>b.progress-a.progress);
+ const raceScore=p=>(Number(p.lap||1)-1)+Number(p.progress||0)+(p.finish?100-p.finish:0);
+ const sorted=[...s.players].sort((a,b)=>raceScore(b)-raceScore(a));
  $('score').innerHTML=sorted.map((p,i)=>{const c=CHARACTERS.find(x=>x.id===p.characterId)||CHARACTERS[i%CHARACTERS.length];return `<div class="race-player" style="--c:${p.color}"><span class="race-rank">${i+1}</span><img src="${c.portrait}" alt=""><b>${escapeHtml(p.nickname)}</b></div>`}).join('');
  for(const p of s.players){
   let o=playerMeshes.get(p.id);
-  if(!o){const c=CHARACTERS.find(x=>x.id===p.characterId)||CHARACTERS[(p.id?.length||0)%CHARACTERS.length];o=buildVehicle(c);o.position.set(p.x,.22,p.y);scene.add(o);playerMeshes.set(p.id,o)}
-  const target=new THREE.Vector3(p.x,.22,p.y);o.position.lerp(target,1-Math.exp(-dt*11));o.rotation.y=THREE.MathUtils.lerp(o.rotation.y,p.a,1-Math.exp(-dt*14));
-  const steerVisual=Math.max(-1,Math.min(1,(p.lane||0)/7.5));o.rotation.z=THREE.MathUtils.lerp(o.rotation.z,-steerVisual*.10,1-Math.exp(-dt*9));
-  o.rotation.x=THREE.MathUtils.lerp(o.rotation.x,(p.brake?-.025:0)+(p.boost>0?.018:0),1-Math.exp(-dt*7));
-  const boost=p.boost>0;o.scale.setScalar(boost?1.085:1.0);
-  if(o.userData.exhaust)o.userData.exhaust.forEach((f,i)=>{f.visible=boost;f.scale.y=boost?(.8+Math.sin(performance.now()*.02+i)*.16):1;});
-  if(o.userData.wheels)o.userData.wheels.forEach(w=>{w.wheel.rotation.x-=Math.max(.02,(p.speed||0)*dt*1.9);if(w.front)w.group.rotation.y=THREE.MathUtils.lerp(w.group.rotation.y,steerVisual*.28,1-Math.exp(-dt*12));});
+  if(!o){const c=CHARACTERS.find(x=>x.id===p.characterId)||CHARACTERS[(p.id?.length||0)%CHARACTERS.length];o=buildVehicle(c,p.cosmetics);o.position.set(p.x,.22,p.y);scene.add(o);playerMeshes.set(p.id,o)}
+  const target=new THREE.Vector3(p.x,.22,p.y);o.position.lerp(target,1-Math.exp(-dt*10));o.rotation.y=THREE.MathUtils.lerp(o.rotation.y,p.a,1-Math.exp(-dt*12));o.rotation.z=THREE.MathUtils.lerp(o.rotation.z,-(p.lane||0)*0.035,1-Math.exp(-dt*8));const boost=p.boost>0;o.scale.setScalar(boost?1.075:1);
+  const speedAbs=Math.abs(p.speed||0);o.userData.wheels?.forEach(w=>w.rotation.x-=dt*speedAbs*2.8);
+  o.position.y=.22+Math.sin(performance.now()/85+(p.progress||0)*20)*Math.min(.035,speedAbs*.002);
+  o.rotation.x=THREE.MathUtils.lerp(o.rotation.x,boost?-.035:0,1-Math.exp(-dt*8));
+  if(o.userData.exhaust)o.userData.exhaust.forEach(f=>f.visible=boost);
  }
  for(const [id,o] of playerMeshes)if(!s.players.some(p=>p.id===id)){scene.remove(o);playerMeshes.delete(id)}
  const me=s.players.find(p=>p.id===socket.id)||s.players.find(p=>p.nickname===currentUser)||s.players[0];
  if(me){
-  const speedN=Math.max(0,Math.min(1,(me.speed||0)/21));
-  const behind=8.8+speedN*1.4,ahead=11+speedN*3.0;
-  cameraTarget.set(me.x-Math.sin(me.a)*behind,3.55+speedN*.35,me.y-Math.cos(me.a)*behind);camera.position.lerp(cameraTarget,1-Math.exp(-dt*7));
-  cameraLook.set(me.x+Math.sin(me.a)*ahead,1.2,me.y+Math.cos(me.a)*ahead);camera.lookAt(cameraLook);
-  const desiredFov=64+speedN*8+(me.boost>0?4:0);if(Math.abs(camera.fov-desiredFov)>.05){camera.fov=THREE.MathUtils.lerp(camera.fov,desiredFov,1-Math.exp(-dt*4));camera.updateProjectionMatrix();}
+  const speedNorm=Math.min(1,Math.abs(me.speed||0)/18);camera.fov=THREE.MathUtils.lerp(camera.fov,64+speedNorm*8,1-Math.exp(-dt*4));camera.updateProjectionMatrix();
+  const behind=9.2+speedNorm*1.8,ahead=12+speedNorm*4;
+  const shake=me.boost>0&&effectiveQuality()!=="low"?Math.sin(performance.now()*.055)*.055:0;
+  cameraTarget.set(me.x-Math.sin(me.a)*behind+shake,3.65+Math.abs(shake)*.35,me.y-Math.cos(me.a)*behind);camera.position.lerp(cameraTarget,Math.min(1,0.18));
+  cameraLook.set(me.x+Math.sin(me.a)*ahead,1.25,me.y+Math.cos(me.a)*ahead);camera.lookAt(cameraLook);
   $('bar').style.width=me.energy+'%';$('speed').textContent=String(Math.round(me.speed*12)).padStart(3,'0');$('lap').textContent=`VOLTA ${Math.min(me.lap,3)}/3`;
+  $('racePosition').textContent=String(Math.max(1,sorted.findIndex(p=>p.id===me.id)+1));$('raceProgress').style.width=Math.min(100,((Math.max(1,me.lap)-1+me.progress)/3)*100)+'%';$('speedLines').style.setProperty('--speed-opacity',String(Math.max(0,(speedNorm-.68)*1.8)));
+  $('driftStatus').textContent=me.driftLevel>=2?'SUPER DRIFT PRONTO':me.driftLevel>=1?'DRIFT CARREGANDO':'SHIFT / ESPAÇO';
   const itemReady=!!me.itemReady;
   for(const id of ['sab','touchItem']){const b=$(id);if(!b)continue;b.classList.toggle('item-ready',itemReady);b.classList.toggle('item-empty',!itemReady);b.setAttribute('aria-disabled',String(!itemReady));b.title=itemReady?'ITEM PRONTO':'ITEM INDISPONÍVEL';}
  }
@@ -691,27 +802,17 @@ function updateCars(s,dt=.016){
 function drawMap(s){
  const c=$('map'),x=c.getContext('2d');x.clearRect(0,0,c.width,c.height);x.strokeStyle='#ffffff88';x.lineWidth=7;x.beginPath();for(let i=0;i<=90;i++){const a=i/90*Math.PI*2;x.lineTo(90+65*Math.sin(a),50+35*Math.cos(a));}x.stroke();for(const p of s.players){x.fillStyle=p.color;x.beginPath();x.arc(90+62*Math.sin(p.progress*2*Math.PI),50+33*Math.cos(p.progress*2*Math.PI),4,0,Math.PI*2);x.fill();}
 }
-function updateAdaptivePerformance(now){
- perfFrames++;
- if(now-perfSampleAt<2000)return;
- perfFps=perfFrames*1000/Math.max(1,now-perfSampleAt);perfFrames=0;perfSampleAt=now;
- if(!renderer||quality!=="auto")return;
- const base=renderer.userData.baseDpr||1;
- if(perfFps<42)adaptiveScale=Math.max(.62,adaptiveScale-.10);
- else if(perfFps>56)adaptiveScale=Math.min(1,adaptiveScale+.05);
- renderer.setPixelRatio(base*adaptiveScale);
- const canvas=$('scene'),r=canvas?.getBoundingClientRect();if(r){const w=Math.max(320,Math.round(r.width)),h=Math.max(180,Math.round(r.height));renderer.setSize(w,h,false);lastCanvasW=w;lastCanvasH=h;}
-}
 function animate(){
  if(!gameRunning)return;
  requestAnimationFrame(animate);
  try{
-  const now=performance.now();updateAdaptivePerformance(now);const dt=Math.min(.05,Math.max(.001,(now-lastFrameTime)/1000||.016));lastFrameTime=now;
+  const now=performance.now(),dt=Math.min(.05,Math.max(.001,(now-lastFrameTime)/1000||.016));lastFrameTime=now;
   if(lastState)updateCars(lastState,dt);
   if(particles)particles.rotation.y+=dt*.015;
   itemBoxes.forEach((b,i)=>{b.rotation.y+=dt*(1.0+(i%3)*.15);b.position.y=1.35+Math.sin(now/260+i)*.12;});
   if(renderer&&scene&&camera)renderer.render(scene,camera);
   $('timer').textContent=new Date(Date.now()-lastRaceStart).toISOString().slice(14,19);
+  frameBudgetCount++;if(quality==="auto"&&!adaptiveReduced&&now-frameBudgetStarted>4500){const fps=frameBudgetCount/((now-frameBudgetStarted)/1000);if(fps<29&&renderer){adaptiveReduced=true;renderer.setPixelRatio(Math.min(.82,devicePixelRatio||1));document.documentElement.classList.add('quality-low');toast('Desempenho ajustado automaticamente');}else{frameBudgetStarted=now;frameBudgetCount=0;}}
  }catch(err){
   console.error('NEON PATH render loop recovered:',err); handleClientFault(err,"render-loop");
   gameRunning=false;
@@ -735,36 +836,95 @@ function recoverRaceAfterRenderError(id){
   message('Não foi possível iniciar o motor 3D. Tente novamente.');
  }
 }
-function resize(){if(!renderer||!camera)return;const c=$('scene'),r=c?.getBoundingClientRect();const w=Math.max(320,Math.round(r?.width||innerWidth)),h=Math.max(180,Math.round(r?.height||innerHeight));camera.aspect=w/h;camera.updateProjectionMatrix();renderer.setSize(w,h,false);lastCanvasW=w;lastCanvasH=h;}
+function resize(){if(!renderer||!camera)return;camera.aspect=innerWidth/innerHeight;camera.updateProjectionMatrix();renderer.setSize(innerWidth,innerHeight,false);}
 function emitSteer(type){if(socket.connected)socket.emit('input',{type});}
-addEventListener('keydown',e=>{if(e.repeat)return;if(e.key==='ArrowLeft'||e.key.toLowerCase()==='a'){keys.left=true;emitSteer('left')}if(e.key==='ArrowRight'||e.key.toLowerCase()==='d'){keys.right=true;emitSteer('right')}if(e.key.toLowerCase()==='w'||e.key==='ArrowUp')socket.connected&&socket.emit('input',{type:'throttle',active:true});if(e.key.toLowerCase()==='s'||e.key==='ArrowDown')socket.connected&&socket.emit('input',{type:'brake',active:true});if(e.code==='Space'||e.key.toLowerCase()==='shift'){if(socket.connected)socket.emit('input',{type:'turbo'});}
+addEventListener('keydown',e=>{if(e.repeat)return;if(e.key==='Escape'&&gameRunning){$('pausePanel').classList.remove('hidden');return;}if(e.key==='ArrowLeft'||e.key.toLowerCase()==='a'){keys.left=true;emitSteer('left')}if(e.key==='ArrowRight'||e.key.toLowerCase()==='d'){keys.right=true;emitSteer('right')}if(e.key.toLowerCase()==='w'||e.key==='ArrowUp')socket.connected&&socket.emit('input',{type:'throttle',active:true});if(e.key.toLowerCase()==='s'||e.key==='ArrowDown')socket.connected&&socket.emit('input',{type:'brake',active:true});if(e.code==='Space'||e.key.toLowerCase()==='shift'){if(socket.connected){socket.emit('input',{type:'turbo'});playSfx('turbo');}}
  if(e.key.toLowerCase()==='x'){if(socket.connected)socket.emit('input',{type:'drift',active:true});}});
 addEventListener('keyup',e=>{if(e.key==='ArrowLeft'||e.key.toLowerCase()==='a')keys.left=false;if(e.key==='ArrowRight'||e.key.toLowerCase()==='d')keys.right=false;if((e.key.toLowerCase()==='w'||e.key==='ArrowUp')&&socket.connected)socket.emit('input',{type:'throttle',active:false});if((e.key.toLowerCase()==='s'||e.key==='ArrowDown')&&socket.connected)socket.emit('input',{type:'brake',active:false});if(e.key.toLowerCase()==='x'&&socket.connected)socket.emit('input',{type:'drift',active:false});if(!keys.left&&!keys.right)emitSteer('neutral');});
 function bindHold(id,type){const b=$(id);if(!b)return;const stop=e=>{e?.preventDefault?.();b.releasePointerCapture?.(e.pointerId);clearInterval(b.__hold);emitSteer('neutral');};b.onpointerdown=e=>{e.preventDefault();b.setPointerCapture?.(e.pointerId);emitSteer(type);clearInterval(b.__hold);b.__hold=setInterval(()=>emitSteer(type),90);};b.onpointerup=stop;b.onpointercancel=stop;b.onpointerleave=e=>{if(e.buttons===0)stop(e);};}
 function bindDrift(id){const b=$(id);if(!b)return;const stop=e=>{e?.preventDefault?.();b.releasePointerCapture?.(e.pointerId);clearInterval(b.__hold);socket.connected&&socket.emit('input',{type:'drift',active:false});b.classList.remove('held');};b.onpointerdown=e=>{e.preventDefault();b.setPointerCapture?.(e.pointerId);b.classList.add('held');socket.connected&&socket.emit('input',{type:'drift',active:true});};b.onpointerup=stop;b.onpointercancel=stop;b.onpointerleave=e=>{if(e.buttons===0)stop(e);};}
 function bindActionHold(id,type){const b=$(id);if(!b)return;const stop=e=>{e?.preventDefault?.();b.releasePointerCapture?.(e.pointerId);socket.connected&&socket.emit('input',{type,active:false});b.classList.remove('held');};b.onpointerdown=e=>{e.preventDefault();b.setPointerCapture?.(e.pointerId);b.classList.add('held');socket.connected&&socket.emit('input',{type,active:true});};b.onpointerup=stop;b.onpointercancel=stop;b.onpointerleave=e=>{if(e.buttons===0)stop(e);};}
 bindHold('touchLeft','left');bindHold('touchRight','right');bindDrift('touchDrift');
-$('turbo').onclick=()=>socket.connected&&socket.emit('input',{type:'turbo'});$('sab').onclick=()=>socket.connected&&$('sab').classList.contains('item-ready')&&socket.emit('input',{type:'sabotage'});
-$('touchTurbo').onclick=()=>socket.connected&&socket.emit('input',{type:'turbo'});$('touchItem').onclick=()=>socket.connected&&$('touchItem').classList.contains('item-ready')&&socket.emit('input',{type:'sabotage'});
+const useTurbo=()=>{if(socket.connected){socket.emit('input',{type:'turbo'});playSfx('turbo');}};
+$('turbo').onclick=useTurbo;$('sab').onclick=()=>socket.connected&&$('sab').classList.contains('item-ready')&&socket.emit('input',{type:'sabotage'});
+$('touchTurbo').onclick=useTurbo;$('touchItem').onclick=()=>socket.connected&&$('touchItem').classList.contains('item-ready')&&socket.emit('input',{type:'sabotage'});
 bindActionHold('touchAccelerate','throttle');bindActionHold('touchBrake','brake');
 function exitRace(){gameRunning=false;releaseFullscreen();try{socket.emit("room:leave");}catch{}playerMeshes.clear();if(scene){scene.traverse(o=>{if(o.geometry)o.geometry.dispose?.();if(o.material){const ms=Array.isArray(o.material)?o.material:[o.material];ms.forEach(m=>{m.map?.dispose?.();m.dispose?.();});}});}show("menu");message("Você saiu da corrida.");}
-$("raceExit").onclick=exitRace;
-function showFinish(results,track){
- gameRunning=false;show("finish");
- const icons=["🥇","🥈","🥉"],top=results.slice(0,3);
- $("podium").innerHTML=top.map((p,i)=>`<div class="pod ${i===0?"first":i===1?"second":"third"}"><div class="avatar">${CHARACTERS[i%CHARACTERS.length].icon}</div><b>${icons[i]} ${escapeHtml(p.nickname)}</b><small>${p.position}º LUGAR</small></div>`).join("");
- $("rewards").innerHTML=`<div class="reward">◉ +250 MOEDAS</div><div class="reward">XP +120</div><div class="reward">♛ +1 PRESTÍGIO</div>`;
+$("raceExit").onclick=()=>$("pausePanel").classList.remove("hidden");$("racePause").onclick=()=>$("pausePanel").classList.remove("hidden");$("resumeRace").onclick=()=>$("pausePanel").classList.add("hidden");$("pauseExit").onclick=()=>{$("pausePanel").classList.add("hidden");exitRace();};$("raceAudio").onclick=toggleAudio;
+$("pauseSettings").onclick=()=>{$("pausePanel").classList.add("hidden");openSettings();};
+document.addEventListener('visibilitychange',()=>{if(document.hidden&&gameRunning){emitSteer('neutral');socket.connected&&socket.emit('input',{type:'throttle',active:false});}});
+function showFinish(results=[],track,rewards={},profile){
+ gameRunning=false;$("loadingVideo")?.pause();playSfx("finish");show("finish");
+ const top=results.slice(0,3);
+ $("podium").innerHTML=top.map((p,i)=>{const c=CHARACTERS.find(x=>x.id===Number(p.characterId))||CHARACTERS[i%CHARACTERS.length];return `<div class="pod ${i===0?"first":i===1?"second":"third"}"><div class="avatar"><img src="${c.portrait}" alt="${c.name}" style="width:100%;height:100%;object-fit:cover;border-radius:50%"></div><b>${p.position||i+1}º · ${escapeHtml(p.nickname)}</b><small>${i===0?"VITÓRIA":i===1?"VICE-CAMPEÃO":"PÓDIO"}</small></div>`}).join("");
+ const xp=Math.max(0,Number(rewards?.xp)||0),coins=Math.max(0,Number(rewards?.coins)||0),ph=Number(rewards?.ph)||0,prestigeUp=!!rewards?.prestigeUp;
+ $("rewards").innerHTML=`<div class="reward">◉ +${formatNumber(coins)} MOEDAS</div><div class="reward">XP +${formatNumber(xp)}</div><div class="reward">${ph>=0?"+":""}${ph} PH</div>${Number(rewards?.dailyBonus)>0?'<div class="reward">MISSÃO DIÁRIA +450 ◉</div>':""}${Number(rewards?.prestigeCoinBonus)>0?'<div class="reward">COFRE VANGUARDA +1.500 ◉</div>':""}${prestigeUp?'<div class="reward">NOVO PRESTÍGIO · ITEM DESBLOQUEADO!</div>':""}`;
+ if(profile)applyProfile(profile);else if(authToken)setTimeout(()=>api("/api/profile").then(applyProfile).catch(()=>{}),400);
 }
-$("nextRace").onclick=()=>{show("menu");message("Escolha outra pista e corra novamente.")};
+$("nextRace").onclick=()=>{show("menu");message("Recompensas salvas. Pronto para outra corrida.")};
+$("raceAgain").onclick=()=>{show("menu");openModes()};
 
-function modal(title,html){$("modalContent").innerHTML=`<h2>${title}</h2>${html}`;$("overlayPanel").classList.remove("hidden")}
+function modal(title,html,kicker="NEON PATH"){const box=$("modalContent");box.innerHTML=`<span class="eyebrow">${escapeHtml(kicker)}</span><h2>${escapeHtml(title)}</h2>${html}`;$("overlayPanel").classList.remove("hidden")}
 $("modalClose").onclick=()=>$("overlayPanel").classList.add("hidden");
-$("configBtn").onclick=()=>modal("CONFIGURAÇÕES",`<div class="settings-grid">
- <div class="setting"><b>QUALIDADE</b><p>Reduza efeitos e resolução para celulares fracos.</p><button data-q="low">BAIXA</button><button data-q="medium">MÉDIA</button><button data-q="high">ALTA</button><button data-q="auto">AUTO</button></div>
- <div class="setting"><b>CONTROLES</b><p>PC: A/D ou ←/→. Turbo: SHIFT ou ESPAÇO.</p><p>Celular: botões na tela.</p></div>
- <div class="setting"><b>DESEMPENHO</b><p>Mapas são construídos sob demanda. Texturas não são baixadas todas de uma vez.</p></div>
- <div class="setting"><b>ÁUDIO</b><p>Controles de áudio preparados para a próxima camada.</p></div></div>`);
-document.querySelector("#modalContent").onclick=e=>{const q=e.target.dataset.q;if(q){quality=q;localStorage.setItem("neon_quality",q);e.target.parentElement.querySelectorAll("button").forEach(b=>b.style.outline=b.dataset.q===q?"2px solid #00eaff":"none");$("overlayPanel").classList.add("hidden");message("Qualidade salva: "+q.toUpperCase())}};
-$("rank").onclick=async()=>{try{const a=await api("/api/rank");modal("RANKING GLOBAL",a.length?`<div>${a.map((x,i)=>`<div class="p"><span>${i+1}º ${escapeHtml(x.nickname)}</span><b>${x.ph} PH</b></div>`).join("")}</div>`:"<p>Ranking vazio.</p>")}catch(e){message("Ranking indisponível")}};
-$("shopBtn").onclick=()=>modal("LOJA",`<div class="shop-unavailable"><b>INDISPONÍVEL NO MOMENTO</b><p>A loja está temporariamente desativada enquanto os sistemas de cosméticos são revisados.</p></div>`);
-$("modalContent").addEventListener("click",async e=>{const code=e.target.dataset.buy;if(!code)return;try{await api("/api/shop/buy",{method:"POST",body:JSON.stringify({code})});e.target.textContent="ADQUIRIDO";}catch(err){e.target.textContent=err.message.toUpperCase()}});
+function openSettings(){
+ modal("AJUSTES",`<div class="settings-grid">
+  <div class="setting"><b>QUALIDADE GRÁFICA</b><p>O modo AUTO reduz resolução quando o FPS cai.</p><button data-q="low" class="${quality==='low'?'active':''}">BAIXA</button><button data-q="medium" class="${quality==='medium'?'active':''}">MÉDIA</button><button data-q="high" class="${quality==='high'?'active':''}">ALTA</button><button data-q="auto" class="${quality==='auto'?'active':''}">AUTO</button></div>
+  <div class="setting"><b>TRILHA ORIGINAL</b><p>Velocity Protocol · tema adaptado para loop.</p><button data-audio="toggle" class="${audioEnabled?'active':''}">${audioEnabled?'ÁUDIO LIGADO':'ÁUDIO DESLIGADO'}</button><label for="musicVolume">VOLUME</label><input id="musicVolume" type="range" min="0" max="1" step="0.05" value="${musicVolume}"></div>
+  <div class="setting"><b>CONTROLES</b><p>PC: W/A/S/D ou setas. Turbo: SHIFT/ESPAÇO. Drift: X.</p><p>Celular: direção, drift, freio, acelerar, turbo e item na tela.</p></div>
+  <div class="setting"><b>RECURSOS</b><p>Pacote atual: <strong>${selectedResourcePack.toUpperCase()}</strong>. Você pode trocar o pacote apagando os dados do site no navegador.</p><button data-action="fullscreen">TESTAR TELA CHEIA</button></div>
+ </div>`,"SISTEMA");
+}
+$("configBtn").onclick=openSettings;
+
+const itemGlyph=type=>({crown:"♛",trail:"⌁",aura:"◉",effect:"✦",back:"◇",kart:"⬢",map:"▦"}[type]||"◆");
+async function openShop(){
+ modal("LOJA NEON",'<p class="modal-muted">Carregando catálogo seguro...</p>',"ECONOMIA");
+ try{
+  const [items,inventory,profile]=await Promise.all([api("/api/shop"),api("/api/inventory"),api("/api/profile")]);applyProfile(profile);const owned=new Set(inventory.map(x=>x.code));
+  const cards=items.map(it=>`<article class="shop-item" data-rarity="${escapeHtml(it.rarity)}"><div class="item-icon">${itemGlyph(it.type)}</div><span class="rarity">${escapeHtml(it.rarity)}</span><h3>${escapeHtml(it.name)}</h3><p>${escapeHtml(it.description||it.type)}</p><footer><b>◉ ${formatNumber(it.price)}</b>${owned.has(it.code)?'<button disabled>ADQUIRIDO</button>':`<button data-buy="${escapeHtml(it.code)}">COMPRAR</button>`}</footer></article>`).join("");
+  modal("LOJA NEON",`<div class="shop-head"><p class="modal-muted">Cosméticos não alteram a física da corrida.</p><div class="wallet">◉ ${formatNumber(profile.bruto_coins)}</div></div><div class="shop-grid">${cards||'<p>Catálogo vazio.</p>'}</div>`,"ECONOMIA");
+ }catch(e){modal("LOJA INDISPONÍVEL",`<p class="modal-muted">A conexão com a economia não respondeu: ${escapeHtml(e.message)}</p>`,"RECUPERAÇÃO");}
+}
+async function openInventory(){
+ modal("INVENTÁRIO",'<p class="modal-muted">Sincronizando seus itens...</p>',"GARAGEM");
+ try{const items=await api("/api/inventory");const cards=items.map(it=>`<article class="inventory-item" data-rarity="${escapeHtml(it.rarity)}"><div class="item-icon">${itemGlyph(it.type)}</div><span class="rarity">${escapeHtml(it.rarity)}</span><h3>${escapeHtml(it.name)}</h3><p>${escapeHtml(it.type)}</p><footer><span>${it.equipped?'EQUIPADO':'DISPONÍVEL'}</span><button data-equip="${escapeHtml(it.code)}" ${it.equipped?'disabled':''}>${it.equipped?'ATIVO':'EQUIPAR'}</button></footer></article>`).join("");modal("INVENTÁRIO",`<div class="inventory-grid">${cards||'<p class="modal-muted">Seu inventário ainda está vazio.</p>'}</div>`,"GARAGEM");}catch(e){modal("INVENTÁRIO",`<p class="modal-muted">Não foi possível carregar: ${escapeHtml(e.message)}</p>`,"RECUPERAÇÃO");}
+}
+async function openRanking(){
+ modal("RANK MUNDIAL",'<p class="modal-muted">Calculando os maiores pilotos...</p>',"TEMPORADA 01");
+ try{const rows=await api("/api/rank");const html=rows.map((x,i)=>`<div class="rank-row ${i<3?'top':''}"><span class="rank-pos">${i+1}</span><span class="rank-avatar">${escapeHtml(String(x.nickname||'NP').slice(0,2).toUpperCase())}</span><span class="rank-driver"><b>${escapeHtml(x.nickname)}</b><small>${formatNumber(x.wins)} vitórias · ${formatNumber(x.races)} corridas</small></span><span class="rank-prestige">P${Math.min(5,Number(x.prestige)||0)} · LV ${Number(x.level)||1}</span><span class="rank-score">${formatNumber(x.ph)} PH</span></div>`).join("");modal("RANK MUNDIAL",`<div class="rank-head"><p class="modal-muted">Top 50 por Pontos de Honra, com Prestígio como desempate.</p></div><div class="rank-list">${html||'<p>Ranking vazio.</p>'}</div>`,"TEMPORADA 01");}catch(e){modal("RANK MUNDIAL",`<p class="modal-muted">Ranking temporariamente indisponível: ${escapeHtml(e.message)}</p>`,"RECUPERAÇÃO");}
+}
+function openPrestige(){
+ const xp=Math.max(0,Number(currentProfile?.lifetime_xp)||0),level=Math.max(0,Math.min(5,Number(currentProfile?.prestige)||prestigeTierFor(xp).level)),tier=PRESTIGE_TIERS[level];
+ const road=PRESTIGE_TIERS.slice(1).map(t=>`<div class="prestige-tier ${level>=t.level?'unlocked':''} ${level===t.level?'current':''}"><i>${t.level}</i><div><b>${t.name}</b><small>${escapeHtml(t.reward)}</small></div><span>${level>=t.level?'CONQUISTADO':formatNumber(t.xp)+' XP'}</span></div>`).join("");
+ modal("CAMINHO DO PRESTÍGIO",`<div class="prestige-modal"><div class="prestige-hero"><img src="prestige-emblem.webp" alt="Emblema"><b>${tier.name}</b><small>${formatNumber(xp)} XP TOTAL</small></div><div class="prestige-road">${road}</div></div>`,"PROGRESSÃO");
+}
+function logout(showMessage=true){gameRunning=false;authToken='';currentProfile=null;localStorage.removeItem('neon_token');socket.auth={token:''};socket.disconnect();$("overlayPanel").classList.add("hidden");$("app").hidden=true;$("authPanel").hidden=false;setAuthMode('login');if(showMessage)$("authMsg").textContent="Sessão encerrada com segurança.";}
+function openProfile(){const p=currentProfile||{};modal("PERFIL DO PILOTO",`<div class="settings-grid"><div class="setting"><b>${escapeHtml(currentUser)}</b><p>Nível ${Number(p.level)||1} · Prestígio ${Number(p.prestige)||0}</p><p>${formatNumber(p.total_wins||p.wins)} vitórias em ${formatNumber(p.total_races||p.races)} corridas.</p></div><div class="setting"><b>ECONOMIA</b><p>◉ ${formatNumber(p.bruto_coins)} moedas</p><p>${formatNumber(p.lifetime_xp||p.xp)} XP total conquistado.</p><button data-action="logout">SAIR DA CONTA</button></div></div>`,"CARTEIRA DE PILOTO")}
+$("shopBtn").onclick=openShop;$("inventoryBtn").onclick=openInventory;$("rank").onclick=openRanking;$("prestigeBtn").onclick=openPrestige;$("profileBtn").onclick=openProfile;
+
+$("modalContent").addEventListener("click",async e=>{
+ const q=e.target.dataset.q;if(q){quality=q;localStorage.setItem("neon_quality",q);applyQualityClass();openSettings();toast("Qualidade salva: "+q.toUpperCase());return;}
+ if(e.target.dataset.audio){toggleAudio();openSettings();return;}
+ if(e.target.dataset.action==="fullscreen"){requestFullscreenLandscape();return;}
+ if(e.target.dataset.action==="logout"){logout();return;}
+ const buy=e.target.dataset.buy;if(buy){e.target.disabled=true;e.target.textContent="COMPRANDO...";try{const result=await api("/api/shop/buy",{method:"POST",body:JSON.stringify({code:buy})});if(result.profile)applyProfile(result.profile);playSfx("finish");toast("Item adquirido");openShop();}catch(err){e.target.disabled=false;e.target.textContent="TENTAR NOVAMENTE";toast(err.message);}return;}
+ const equip=e.target.dataset.equip;if(equip){e.target.disabled=true;try{await api("/api/inventory/equip",{method:"POST",body:JSON.stringify({code:equip})});toast("Item equipado");openInventory();}catch(err){toast(err.message);e.target.disabled=false;}return;}
+});
+$("modalContent").addEventListener("input",e=>{if(e.target.id==="musicVolume"){musicVolume=Number(e.target.value);localStorage.setItem("neon_music_volume",String(musicVolume));syncAudio();}});
+
+
+// ===== CINEMATIC / QA DEMO MODE =====
+// Only enabled explicitly with ?demo=1. It never affects normal players.
+if(new URLSearchParams(location.search).get('demo')==='1'){
+  addEventListener('load',async()=>{
+    try{
+      document.getElementById('termsGate')?.remove();document.getElementById('authPanel')?.remove();
+      document.getElementById('app').hidden=false;currentUser='CeoVelho';selectedTrack=new URLSearchParams(location.search).get('track')||'pirate-bay';
+      const demoPlayers=CHARACTERS.map((c,i)=>({id:i===0?'demo-me':'demo-'+i,nickname:i===0?'CeoVelho':c.name,characterId:c.id,color:c.color,progress:(.03-i*.006+1)%1,lap:1,speed:13+i*.25,a:0,x:0,y:0,energy:92,boost:i===0?1:0,itemReady:i===0}));
+      lastState={track:selectedTrack,players:demoPlayers};
+      await startGame(selectedTrack);lastRaceStart=Date.now()-73000;
+      const rx=48,rz=28;let t=.08;
+      const tick=()=>{if(!gameRunning)return;t=(t+.00075)%1;demoPlayers.forEach((p,i)=>{const u=(t-i*.012+1)%1,a=u*Math.PI*2;p.progress=u;p.lap=2;p.speed=14+Math.sin(performance.now()/500+i)*1.6;p.x=rx*Math.sin(a);p.y=rz*Math.cos(a);const dx=rx*Math.cos(a),dz=-rz*Math.sin(a);p.a=Math.atan2(dx,dz);p.boost=i===0&&Math.sin(performance.now()/650)>0.35?1:0;});lastState={track:selectedTrack,players:demoPlayers};requestAnimationFrame(tick)};tick();
+    }catch(e){console.error(e)}
+  },{once:true});
+}

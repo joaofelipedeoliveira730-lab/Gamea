@@ -1,19 +1,25 @@
 {
   "name": "neon-path",
-  "version": "10.0.0",
+  "version": "12.0.1",
   "private": true,
   "scripts": {
     "start": "node server.js",
-    "test": "node test.js"
+    "test": "node test.js && node test-qa.js && node test-room.js",
+    "test:core": "node test.js",
+    "test:qa": "node test-qa.js",
+    "test:security": "node test-room.js"
+  },
+  "engines": {
+    "node": ">=20"
   },
   "dependencies": {
-    "bcryptjs": "^3.0.2",
-    "cors": "^2.8.5",
-    "dotenv": "^16.6.1",
-    "express": "^5.1.0",
-    "helmet": "^8.1.0",
-    "jsonwebtoken": "^9.0.2",
-    "pg": "^8.16.3",
-    "socket.io": "^4.8.1"
+    "bcryptjs": "3.0.2",
+    "cors": "2.8.5",
+    "dotenv": "16.6.1",
+    "express": "5.1.0",
+    "helmet": "8.1.0",
+    "jsonwebtoken": "9.0.2",
+    "pg": "8.16.3",
+    "socket.io": "4.8.1"
   }
 }

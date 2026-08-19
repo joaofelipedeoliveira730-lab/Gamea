@@ -5,10 +5,17 @@ services:
     plan: free
     buildCommand: npm install
     startCommand: npm start
+    healthCheckPath: /health
     envVars:
       - key: DATABASE_URL
         sync: false
-      - key: PUBLIC_ORIGIN
-        value: https://SEU-FRONTEND.github.io
+      - key: JWT_SECRET
+        generateValue: true
+      - key: CEO_ROOM_KEY
+        generateValue: true
+      # Opcional quando cliente e servidor usam este mesmo serviço.
+      # Em frontend separado, informe a origem completa, sem caminho.
+      - key: CLIENT_ORIGIN
+        sync: false
       - key: NODE_ENV
         value: production

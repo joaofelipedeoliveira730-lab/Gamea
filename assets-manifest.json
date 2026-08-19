@@ -1,6 +1,34 @@
 {
-  "version": "9.7-flat",
+  "version": "12.0.1-prestige",
   "download_strategy": "lazy-per-race",
+  "packs": {
+    "lite": [
+      "index.html",
+      "style.css",
+      "app.js",
+      "config.js",
+      "loading-hero.webp",
+      "map-porto-fantasma.webp",
+      "prestige-emblem.webp",
+      "loading-cinematic.mp4",
+      "velocity-protocol.mp3",
+      "1-spark.svg",
+      "2-luna.svg",
+      "3-steel.svg",
+      "4-zippy.svg",
+      "5-blaze.svg",
+      "6-frost.svg",
+      "7-rocky.svg",
+      "8-nitro.svg"
+    ],
+    "hd_includes": ["lite", "hd_scenes", "environment_textures", "sky_billboards", "arena_detail"]
+  },
+  "budgets": {
+    "initial_shell_kb": 450,
+    "essential_pack_mb": 3,
+    "concurrent_downloads": 3,
+    "automatic_quality_fallback_fps": 29
+  },
   "environment_textures": [
     "environment_01.jpg",
     "environment_02.jpg",
@@ -46,7 +74,7 @@
     "sky_billboard_05.jpg",
     "sky_billboard_06.jpg"
   ],
-  "initial_download": "UI + engine + menus; corrida baixa somente o mapa/personagens necessários",
+  "initial_download": "Shell, UI e pôster WebP; vídeo, áudio e mapas são baixados sob demanda ou pelo pacote escolhido",
   "quality_profiles": {
     "low": {
       "pixelRatio": 0.75,
@@ -108,5 +136,5 @@
     "7-rocky.svg",
     "8-nitro.svg"
   ],
-  "layout": "single-directory-github"
+  "layout": "single-directory-web-deploy"
 }

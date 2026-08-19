@@ -13,6 +13,17 @@ const TURBO_COOLDOWN_MS = 900;
 const SABOTAGE_COOLDOWN_MS = 8000;
 const INPUT_WINDOW_MS = 1000;
 const MAX_INPUTS_PER_WINDOW = 14;
+const PRESTIGE_THRESHOLDS = Object.freeze([0, 1250, 3000, 6000, 10000, 15000]);
+const POSITION_REWARDS = Object.freeze([
+  { xp:260, coins:460, ph:38 },
+  { xp:210, coins:350, ph:28 },
+  { xp:175, coins:285, ph:20 },
+  { xp:145, coins:230, ph:13 },
+  { xp:125, coins:190, ph:8 },
+  { xp:110, coins:160, ph:3 },
+  { xp:95, coins:135, ph:-3 },
+  { xp:85, coins:115, ph:-7 }
+]);
 
 function cleanNick(value) {
   if (typeof value !== 'string') return null;
@@ -31,6 +42,58 @@ function validPassword(value) {
   return typeof value === 'string' && value.length >= 8 && value.length <= 200;
 }
 
+function xpForLevel(level) {
+  return Math.floor(100 * Math.pow(1.12, Math.max(0, Math.min(99, Number(level) || 1) - 1)));
+}
+
+function prestigeForXp(lifetimeXp) {
+  const total = Math.max(0, Number(lifetimeXp) || 0);
+  let prestige = 0;
+  for (let i = 1; i < PRESTIGE_THRESHOLDS.length; i++) {
+    if (total >= PRESTIGE_THRESHOLDS[i]) prestige = i;
+  }
+  return prestige;
+}
+
+function calculateRaceRewards(position, mode = 'public', kills = 0) {
+  const pos = Math.max(1, Math.min(MAX_PLAYERS, Math.floor(Number(position) || MAX_PLAYERS)));
+  const base = POSITION_REWARDS[pos - 1];
+  const modeMultiplier = mode === 'solo' ? 0.72 : 1;
+  const safeKills = Math.max(0, Math.min(7, Math.floor(Number(kills) || 0)));
+  return {
+    xp: Math.round((base.xp + safeKills * 8) * modeMultiplier),
+    coins: Math.round((base.coins + safeKills * 15) * modeMultiplier),
+    ph: Math.round(base.ph * modeMultiplier)
+  };
+}
+
+function advanceProfile(profile, xpGain) {
+  const previous = {
+    level: Math.max(1, Math.min(100, Number(profile?.level) || 1)),
+    xp: Math.max(0, Number(profile?.xp) || 0),
+    lifetimeXp: Math.max(0, Number(profile?.lifetime_xp ?? profile?.lifetimeXp) || 0),
+    prestige: Math.max(0, Math.min(5, Number(profile?.prestige) || 0))
+  };
+  const gain = Math.max(0, Math.min(5000, Math.floor(Number(xpGain) || 0)));
+  let level = previous.level;
+  let xp = previous.xp + gain;
+  while (level < 100 && xp >= xpForLevel(level)) {
+    xp -= xpForLevel(level);
+    level++;
+  }
+  if (level === 100) xp = Math.min(xp, xpForLevel(100));
+  const lifetimeXp = previous.lifetimeXp + gain;
+  const prestige = prestigeForXp(lifetimeXp);
+  return {
+    level,
+    xp,
+    xp_needed: xpForLevel(level),
+    lifetime_xp: lifetimeXp,
+    prestige,
+    prestigeUp: prestige > previous.prestige
+  };
+}
+
 function normalizeRoomCode(value) {
   return String(value || '').trim().toUpperCase().slice(0, MAX_ROOM_CODE_LENGTH);
 }
@@ -42,7 +105,7 @@ function isRoomCodeLengthValid(value) {
 
 function sanitizeInput(message) {
   const type = message && typeof message.type === 'string' ? message.type : '';
-  return ['left', 'right', 'turbo', 'sabotage'].includes(type) ? type : null;
+  return ['left','right','neutral','throttle','brake','drift','turbo','sabotage'].includes(type) ? type : null;
 }
 
 function spawn(index) {
@@ -138,6 +201,8 @@ function collision(player, room) {
 module.exports = {
   MAX_ROOM_CODE_LENGTH, MAX_NICK_LENGTH, WORLD_W, WORLD_H, MAX_PLAYERS, MAX_SPEED,
   BOOST_MULTIPLIER, TICK_MS, TURN_COOLDOWN_MS, TURBO_COOLDOWN_MS, SABOTAGE_COOLDOWN_MS,
+  PRESTIGE_THRESHOLDS, POSITION_REWARDS, xpForLevel, prestigeForXp,
+  calculateRaceRewards, advanceProfile,
   cleanNick, cleanEmail, validPassword, normalizeRoomCode, isRoomCodeLengthValid,
   sanitizeInput, spawn, canAcceptInput, applyInput, chooseSabotageTarget, stepPlayer, collision
 };

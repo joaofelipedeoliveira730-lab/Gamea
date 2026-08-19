@@ -1,141 +1,165 @@
 <!doctype html>
-<html lang="pt-BR">
+<html lang="pt-BR" data-fullscreen="0">
 <head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover">
-<meta name="theme-color" content="#050817">
-<meta name="mobile-web-app-capable" content="yes">
-<meta name="apple-mobile-web-app-capable" content="yes">
-<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-<title>NEON PATH RACING</title>
-<link rel="stylesheet" href="style.css">
-<script src="/socket.io/socket.io.js"></script>
-<script type="importmap">{"imports":{"three":"https://cdn.jsdelivr.net/npm/three@0.178.0/build/three.module.js"}}</script>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover">
+  <meta name="theme-color" content="#060713">
+  <meta name="description" content="NEON PATH: PRESTIGE — corrida arcade 3D multiplayer direto no navegador.">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <title>NEON PATH: PRESTIGE</title>
+  <link rel="manifest" href="manifest.webmanifest">
+  <link rel="preload" href="loading-hero.webp" as="image" type="image/webp">
+  <link rel="stylesheet" href="style.css">
+  <script src="config.js"></script>
+  <script src="/socket.io/socket.io.js"></script>
+  <script type="importmap">{"imports":{"three":"https://cdn.jsdelivr.net/npm/three@0.178.0/build/three.module.js"}}</script>
 </head>
 <body>
-<div id="rotateNotice"><div class="rotate-card"><div class="rotate-icon">↻</div><h2>GIRE O CELULAR</h2><p>NEON PATH RACING foi feito para jogar em <b>paisagem</b>.</p><button id="rotateFullscreen" class="primary" type="button">ATIVAR TELA CHEIA</button><button id="rotateSkip" class="text-btn" type="button">CONTINUAR SEM TELA CHEIA</button></div></div>
-<div id="termsGate" class="gate hidden">
-  <div class="gate-card">
-    <div class="logo">NEON <span>PATH</span></div><h2>ANTES DE CORRER</h2>
-    <p>Para jogar, aceite os termos e prepare os recursos do jogo. Os recursos são baixados de forma otimizada e podem ficar em cache para as próximas corridas.</p>
-    <div class="terms-scroll"><b>TERMOS DE USO</b><p>Use o jogo de forma justa. Não tente manipular velocidade, posições, salas, moedas ou comandos do servidor. O servidor pode encerrar partidas e bloquear ações abusivas.</p><p>Você concorda em não usar automações, exploits ou alterações maliciosas para obter vantagem.</p></div>
-    <label class="check-line"><input id="termsAccept" type="checkbox"> <span>Li e aceito os termos de uso.</span></label>
-    <div class="resource-box"><div><b>RECURSOS</b><small id="resourceStatus">Prontos para baixar sob demanda.</small></div><span id="resourcePercent">0%</span></div>
-    <button id="downloadResources" class="primary" disabled>ACEITAR E BAIXAR RECURSOS</button>
-    <button id="continueWithoutDownload" class="text-btn" disabled>Continuar depois que o download terminar</button>
-  </div>
-</div>
-
-<section id="authPanel" class="auth-screen">
-  <div class="auth-bg"><div class="city-grid"></div><div class="neon-car car-a"></div><div class="neon-car car-b"></div></div>
-  <div class="auth-box">
-    <div class="auth-brand"><div class="logo">NEON <span>PATH</span></div><div class="game-title">RACING</div><p>CORRA. EVOLUA. PRESTIGIE.</p></div>
-    <div class="auth-switch"><button id="showLogin" class="active">ENTRAR</button><button id="showRegister">CADASTRAR</button></div>
-    <div id="loginForm" class="auth-form">
-      <label>APELIDO</label><input id="authNick" maxlength="20" autocomplete="username" placeholder="Digite seu apelido">
-      <label>SENHA</label><input id="authPassword" type="password" minlength="8" maxlength="200" autocomplete="current-password" placeholder="Digite sua senha">
-      <button id="loginBtn" class="primary">ENTRAR NA PISTA</button>
-      <button id="toRegister" class="text-btn">Ainda não tenho conta · Cadastrar</button>
+  <div id="bootSplash" class="boot-splash" aria-live="polite">
+    <div class="boot-backdrop"></div>
+    <div class="boot-content">
+      <div class="brand-lockup" aria-label="NEON PATH Prestige">
+        <span class="brand-kicker">BOMVELHINHO STUDIOS APRESENTA</span>
+        <div class="logo">NEON <span>PATH</span></div>
+        <strong>PRESTIGE</strong>
+      </div>
+      <div class="boot-line"><i id="bootFill"></i></div>
+      <small id="bootText">INICIALIZANDO MOTOR WEB...</small>
     </div>
-    <div id="registerForm" class="auth-form hidden">
-      <label>APELIDO</label><input id="registerNick" maxlength="20" autocomplete="username" placeholder="Escolha seu apelido">
-      <label>SENHA</label><input id="registerPassword" type="password" minlength="8" maxlength="200" autocomplete="new-password" placeholder="Mínimo de 8 caracteres">
-      <label>E-MAIL <span>OPCIONAL</span></label><input id="registerEmail" type="email" maxlength="160" autocomplete="email" placeholder="Pode deixar vazio">
-      <button id="registerBtn" class="primary">CRIAR CONTA</button>
-      <button id="toLogin" class="text-btn">Já tenho conta · Entrar</button>
+  </div>
+
+  <aside id="rotateNotice" aria-label="Orientação recomendada">
+    <div class="rotate-card">
+      <button id="rotateDismiss" class="rotate-close" type="button" aria-label="Fechar aviso">×</button>
+      <div class="rotate-phone" aria-hidden="true"><i></i></div>
+      <p class="eyebrow">MELHOR EXPERIÊNCIA</p>
+      <h2>GIRE O CELULAR</h2>
+      <p>A corrida funciona em retrato, mas a pista fica lendária em paisagem.</p>
+      <button id="rotateFullscreen" class="primary" type="button">JOGAR EM TELA CHEIA</button>
+      <button id="portraitContinue" class="text-btn" type="button">Continuar em retrato</button>
     </div>
-    <div id="authMsg"></div>
-  </div>
-  <div class="version">NEON PATH RACING • V10.0 • PREMIUM RACE ENGINE</div>
-</section>
+  </aside>
 
-<div id="app" hidden>
-<section id="menu" class="screen">
-  <div class="menu-shell">
-    <header class="menu-head">
-      <div><div class="logo small">NEON<span>PATH</span></div><div class="tag">RACE THE LIGHT • SURVIVE THE CIRCUIT</div></div>
-      <div class="profile-chip"><b id="menuNick">Piloto</b><span>LV <i id="menuLevel">1</i></span><strong>◉ <i id="menuCoins">0</i></strong></div>
-    </header>
-    <div class="menu-grid no-garage">
-      <button id="playQuick" class="menu-card featured"><b>JOGAR</b><small>CORRIDA RÁPIDA</small><span>➤</span></button>
-      <button id="shopBtn" class="menu-card"><b>LOJA</b><small>INDISPONÍVEL NO MOMENTO</small><span>◉</span></button>
+  <section id="termsGate" class="gate hidden" aria-labelledby="termsTitle">
+    <div class="gate-card">
+      <div class="gate-visual">
+        <div class="logo small">NEON <span>PATH</span></div>
+        <span>PRESTIGE · V12</span>
+      </div>
+      <div class="gate-copy">
+        <p class="eyebrow">ANTES DA LARGADA</p>
+        <h1 id="termsTitle">PREPARE SEU DISPOSITIVO</h1>
+        <p>Escolha quanto deseja baixar. O pacote leve entra rápido; o HD guarda cenários e vídeo para reduzir carregamentos nas próximas corridas.</p>
+        <div class="terms-scroll" tabindex="0">
+          <b>TERMOS DE JOGO JUSTO</b>
+          <p>Não manipule velocidade, posições, salas, moedas, XP ou mensagens do servidor. A corrida é validada no servidor e ações abusivas podem ser bloqueadas.</p>
+          <p>Relatórios técnicos podem registrar tela, pista, navegador e mensagem de erro para recuperar falhas. Senhas nunca entram nesses relatórios.</p>
+        </div>
+        <div class="resource-plans" role="radiogroup" aria-label="Pacote de recursos">
+          <button id="resourceLite" class="resource-plan selected" data-pack="lite" type="button" role="radio" aria-checked="true">
+            <span>ESSENCIAL</span><b>~ 2 MB</b><small>Interface, áudio e pista procedural.</small>
+          </button>
+          <button id="resourceHd" class="resource-plan" data-pack="hd" type="button" role="radio" aria-checked="false">
+            <span>HD</span><b>~ 16 MB</b><small>Cenários, retratos e carregamento offline.</small>
+          </button>
+        </div>
+        <label class="check-line"><input id="termsAccept" type="checkbox"> <span>Li e aceito os termos de uso.</span></label>
+        <div class="resource-box">
+          <div><b id="resourcePackName">PACOTE ESSENCIAL</b><small id="resourceStatus">Pronto para preparar.</small></div>
+          <span id="resourcePercent">0%</span>
+        </div>
+        <div class="resource-progress"><i id="resourceFill"></i></div>
+        <button id="downloadResources" class="primary" type="button" disabled>PREPARAR E CONTINUAR</button>
+        <button id="continueWithoutDownload" class="text-btn" type="button" disabled>ENTRAR NO PADDOCK</button>
+      </div>
     </div>
-    <div class="quick-links">
-      <button id="charactersBtn">◉ PERSONAGENS</button><button id="mapsBtn">▦ MAPAS</button><button id="rank">♛ RANKING</button><button id="configBtn">⚙ CONFIGURAÇÕES</button>
+  </section>
+
+  <section id="authPanel" class="auth-screen">
+    <div class="auth-cinematic" aria-hidden="true">
+      <video autoplay muted loop playsinline poster="loading-hero.webp"><source src="loading-cinematic.mp4" type="video/mp4"></video>
+      <div class="auth-shade"></div>
+      <div class="auth-promo"><span class="eyebrow">TEMPORADA 01 · VELOCITY PROTOCOL</span><h2>SUBA. DOMINE.<br><em>CONQUISTE PRESTÍGIO.</em></h2><p>Corrida arcade 3D, oito mundos e progressão persistente direto no navegador.</p></div>
     </div>
-    <div class="menu-actions"><button id="soloBtn">SOLO</button><button id="create">SALA PRIVADA</button><button id="join">ENTRAR EM SALA</button><button id="ceoBtn">CEO</button></div>
-    <div id="msg"></div>
-  </div>
-</section>
+    <div class="auth-side">
+      <div class="auth-box">
+        <div class="auth-brand"><div class="logo">NEON <span>PATH</span></div><div class="game-title">PRESTIGE</div><p>CORRA A LUZ · ESCREVA SEU NOME</p></div>
+        <div class="auth-switch" role="tablist"><button id="showLogin" class="active" type="button" role="tab">ENTRAR</button><button id="showRegister" type="button" role="tab">CRIAR PILOTO</button></div>
+        <div id="loginForm" class="auth-form"><label for="authNick">APELIDO</label><input id="authNick" maxlength="20" autocomplete="username" placeholder="Seu nome na pista"><label for="authPassword">SENHA</label><input id="authPassword" type="password" minlength="8" maxlength="200" autocomplete="current-password" placeholder="Sua senha"><button id="loginBtn" class="primary" type="button">ENTRAR NO PADDOCK</button><button id="toRegister" class="text-btn" type="button">Primeira corrida? Criar piloto</button></div>
+        <div id="registerForm" class="auth-form hidden"><label for="registerNick">APELIDO</label><input id="registerNick" maxlength="20" autocomplete="username" placeholder="Escolha seu apelido"><label for="registerPassword">SENHA</label><input id="registerPassword" type="password" minlength="8" maxlength="200" autocomplete="new-password" placeholder="Mínimo de 8 caracteres"><label for="registerEmail">E-MAIL <span>OPCIONAL</span></label><input id="registerEmail" type="email" maxlength="160" autocomplete="email" placeholder="Recuperação futura da conta"><button id="registerBtn" class="primary" type="button">CRIAR PILOTO</button><button id="toLogin" class="text-btn" type="button">Já tenho conta</button></div>
+        <div id="authMsg" class="form-message" aria-live="polite"></div>
+      </div>
+      <footer class="version">NEON PATH · V12.0 PRESTIGE · WEB EDITION</footer>
+    </div>
+  </section>
 
-<section id="select" class="screen hidden">
-  <div class="select-shell">
-    <div class="select-head"><button id="selectBack">←</button><div><h1 id="selectTitle">ESCOLHA SEU PILOTO</h1><small>PERSONAGENS ÚNICOS • EFEITOS LEVES</small></div><span>×</span></div>
-    <div id="characterSelect" class="character-grid"></div>
-    <div class="stat-box"><span>VELOCIDADE <i></i></span><span>ACELERAÇÃO <i></i></span><span>CONTROLE <i></i></span><span>TURBO <i></i></span></div>
-    <button id="selectContinue" class="ready-btn">CONTINUAR</button>
-  </div>
-</section>
+  <main id="app" hidden>
+    <section id="menu" class="screen menu-screen">
+      <div class="menu-wallpaper" aria-hidden="true"></div>
+      <div class="menu-shell">
+        <header class="menu-head">
+          <button class="menu-brand" type="button" aria-label="Início"><span class="logo small">NEON<span>PATH</span></span><small>PRESTIGE</small></button>
+          <div class="server-pill"><i></i><span id="serverState">CONECTANDO</span></div>
+          <button id="profileBtn" class="profile-chip" type="button"><span class="profile-avatar" id="profileAvatar">NP</span><span><b id="menuNick">Piloto</b><small>LV <i id="menuLevel">1</i> · P<i id="menuPrestige">0</i></small></span><strong>◉ <i id="menuCoins">0</i></strong></button>
+        </header>
 
-<section id="tracks" class="screen hidden">
-  <div class="track-shell">
-    <div class="select-head"><button id="tracksBack">←</button><div><h1>ESCOLHA O MAPA</h1><small>PISTAS CARREGADAS SOB DEMANDA</small></div><span>×</span></div>
-    <div id="trackGrid" class="track-grid"></div>
-    <button id="trackReady" class="ready-btn">PRONTO</button>
-  </div>
-</section>
+        <div class="menu-content">
+          <section class="race-hero"><div class="race-hero-art"></div><div class="race-hero-copy"><span class="season-label">TEMPORADA 01</span><h1>RACE THE <em>LIGHT</em></h1><p>O asfalto acaba. A lenda começa.</p><button id="playQuick" class="soul-button play-soul" type="button"><span>CORRER AGORA</span><small>SOLO · ONLINE · PRIVADA</small><i>›</i></button></div><div class="hero-chips"><span>8 PISTAS</span><span>ATÉ 8 PILOTOS</span><span>3D WEB</span></div></section>
+          <aside class="progress-rail">
+            <button id="prestigeBtn" class="prestige-card" type="button"><img src="prestige-emblem.webp" alt="Emblema de Prestígio"><div><span>PRESTÍGIO</span><b id="prestigeName">RECRUTA</b><small id="prestigeProgressText">0 / 1.250 XP</small></div><i>›</i></button>
+            <div class="xp-card"><div><span>NÍVEL <b id="levelLarge">1</b></span><small id="menuXpText">0 / 100 XP</small></div><div class="xp-track"><i id="menuXp"></i></div></div>
+            <div class="mission-card"><span class="eyebrow">MISSÃO DO DIA</span><b id="dailyMissionTitle">Complete 3 corridas</b><div class="mission-progress"><i id="dailyMissionFill"></i></div><small id="dailyMissionText">0/3 · +450 ◉</small></div>
+          </aside>
+        </div>
 
-<section id="lobby" class="screen hidden">
-  <div class="lobby-shell">
-    <div class="lobby-top"><div><small id="lobbyMode">SALA PRIVADA</small><h1 id="roomCode">------</h1><p id="roomName" class="room-name"></p></div><div class="track-badge" id="lobbyTrack">NEON CITY</div></div>
-    <div id="players"></div>
-    <div class="lobby-controls"><button id="start" class="ready-btn hidden">INICIAR CORRIDA</button><button id="back">SAIR</button></div>
-    <div class="ceo-tools hidden" id="ceoTools"><b>CEO • CONTROLE DA PISTA</b><select id="ceoTrack"></select></div>
-    <div id="lobbyMsg"></div>
-  </div>
-</section>
+        <nav class="quick-links" aria-label="Recursos do jogo">
+          <button id="charactersBtn" type="button"><i class="nav-glyph glyph-pilot"></i><span>PILOTOS</span><small>Equipe seu estilo</small></button>
+          <button id="mapsBtn" type="button"><i class="nav-glyph glyph-track"></i><span>PISTAS</span><small>8 mundos vivos</small></button>
+          <button id="shopBtn" type="button"><i class="nav-glyph glyph-shop"></i><span>LOJA</span><small>Cosméticos e mapas</small></button>
+          <button id="inventoryBtn" type="button"><i class="nav-glyph glyph-inventory"></i><span>INVENTÁRIO</span><small>Seus itens</small></button>
+          <button id="rank" type="button"><i class="nav-glyph glyph-rank"></i><span>RANK MUNDIAL</span><small>Top 50 global</small></button>
+          <button id="configBtn" type="button"><i class="nav-glyph glyph-settings"></i><span>AJUSTES</span><small>Gráfico e áudio</small></button>
+        </nav>
+        <div class="menu-actions" aria-label="Acessos rápidos"><button id="soloBtn" type="button">SOLO</button><button id="create" type="button">SALA PRIVADA</button><button id="join" type="button">ENTRAR EM SALA</button><button id="ceoBtn" type="button">CENTRAL CEO</button></div>
+        <div id="msg" class="menu-message" aria-live="polite"></div>
+      </div>
+    </section>
 
-<section id="loading" class="screen hidden">
-  <div class="loading-shell"><div class="loading-scene" id="loadingScene"></div><div class="loading-title" id="loadingTitle">CARREGANDO</div><div class="loading-sub" id="loadingSub">PREPARANDO PISTA...</div><div class="load-bar"><i id="loadFill"></i></div><div class="load-tip" id="loadTip">DICA: use o turbo nas retas.</div></div>
-</section>
+    <section id="select" class="screen hidden selection-screen">
+      <div class="select-shell"><header class="select-head"><button id="selectBack" type="button" aria-label="Voltar">←</button><div><span class="eyebrow">GARAGEM DE PILOTOS</span><h1 id="selectTitle">ESCOLHA SEU PILOTO</h1><small>ESTATÍSTICAS ÚNICAS · COSMÉTICOS SEM VANTAGEM</small></div><span aria-hidden="true">01</span></header><div class="selection-layout"><div id="characterSelect" class="character-grid"></div><aside class="selected-preview"><div id="selectedPortrait" class="selected-portrait"></div><span id="selectedCharacterRarity">INICIAL</span><h2 id="selectedCharacterName">SPARK</h2><div class="stat-box"><span>VELOCIDADE <i data-stat="0"></i></span><span>ACELERAÇÃO <i data-stat="1"></i></span><span>CONTROLE <i data-stat="2"></i></span><span>TURBO <i data-stat="3"></i></span></div></aside></div><button id="selectContinue" class="ready-btn" type="button">ESCOLHER PISTA <span>›</span></button></div>
+    </section>
 
-<section id="game" class="hidden">
- <canvas id="scene"></canvas>
- <div class="race-vignette"></div>
- <div class="race-hud">
-  <div class="race-top"><div class="brand">NEON<span>PATH</span></div><div id="lap">VOLTA 1/3</div><div id="timer">00:00</div></div>
-  <div id="score" class="score"></div>
-  <div class="countdown hidden" id="countdown">3</div>
-  <div class="speed-box"><b id="speed">000</b><small>KM/H</small></div>
-  <div class="mini"><canvas id="map" width="180" height="100"></canvas></div>
-  <div class="energy"><span>TURBO</span><div><i id="bar"></i></div><small>SHIFT / ESPAÇO</small></div>
-  <div class="actions"><button id="turbo">TURBO</button><button id="sab">ITEM</button></div>
-  <div class="touch-controls">
-   <button id="touchLeft" class="steer-btn" aria-label="Virar para esquerda">◀</button>
-   <button id="touchDrift" aria-label="Derrapar">DRIFT</button>
-   <button id="touchRight" class="steer-btn" aria-label="Virar para direita">▶</button>
-  </div>
-  <div class="touch-drive"><button id="touchBrake" aria-label="Freio">FREIO</button><button id="touchAccelerate" aria-label="Acelerar">ACELERAR</button></div>
-  <div class="touch-actions"><button id="touchTurbo">TURBO</button><button id="touchItem" class="item-empty">ITEM</button></div><button id="raceExit" class="race-exit" aria-label="Sair da corrida">SAIR</button>
- </div>
-</section>
+    <section id="tracks" class="screen hidden selection-screen track-screen">
+      <div class="track-shell"><header class="select-head"><button id="tracksBack" type="button" aria-label="Voltar">←</button><div><span class="eyebrow">MUNDOS DISPONÍVEIS</span><h1>ESCOLHA A PISTA</h1><small>CENÁRIOS CARREGADOS SOB DEMANDA</small></div><span aria-hidden="true">02</span></header><div id="trackGrid" class="track-grid"></div><div class="track-footer"><div><span>SELECIONADA</span><b id="selectedTrackName">NEON APEX</b></div><button id="trackReady" class="ready-btn" type="button">PRONTO PARA CORRER <span>›</span></button></div></div>
+    </section>
 
-<section id="finish" class="screen hidden">
- <div class="finish-shell"><div class="finish-kicker">CORRIDA ENCERRADA</div><h1>CHEGADA!</h1><div id="podium" class="podium"></div><div id="rewards" class="rewards"></div><button id="nextRace" class="ready-btn">PRÓXIMA CORRIDA</button></div>
-</section>
+    <section id="lobby" class="screen hidden lobby-screen">
+      <div class="lobby-shell"><div class="lobby-top"><div><small id="lobbyMode">SALA PRIVADA</small><h1 id="roomCode">------</h1><p id="roomName" class="room-name"></p></div><div class="track-badge" id="lobbyTrack">NEON APEX</div></div><div class="lobby-status"><span><i></i> SERVIDOR AUTORITATIVO</span><small>A corrida começa quando o líder estiver pronto.</small></div><div id="players" class="lobby-players"></div><div class="lobby-controls"><button id="start" class="ready-btn hidden" type="button">INICIAR CORRIDA</button><button id="back" type="button">SAIR DA SALA</button></div><div class="ceo-tools hidden" id="ceoTools"><b>CEO · CONTROLE DA PISTA</b><select id="ceoTrack" aria-label="Pista da sala CEO"></select></div><div id="lobbyMsg" class="form-message" aria-live="polite"></div></div>
+    </section>
 
-<section id="modePanel" class="modal hidden"><div class="modal-card mode-card"><button class="modal-close" id="modeClose">×</button><h2>ESCOLHA COMO JOGAR</h2><p class="modal-muted">A corrida solo começa direto. A sala privada usa código, nome e senha.</p><div class="mode-grid"><button id="modeSolo" class="mode-option"><b>SOLO</b><small>Entre na pista imediatamente e dispute a corrida.</small></button><button id="modePrivate" class="mode-option"><b>SALA PRIVADA</b><small>Crie uma sala com nome, código e senha.</small></button><button id="modeJoin" class="mode-option"><b>ENTRAR EM SALA</b><small>Use o código e a senha recebidos.</small></button></div></div></section>
-<section id="privatePanel" class="modal hidden"><div class="modal-card"><button class="modal-close" id="privateClose">×</button><h2 id="privateTitle">SALA PRIVADA</h2><div class="private-tabs"><button id="privateCreateTab" class="active">CRIAR</button><button id="privateJoinTab">ENTRAR</button></div><div id="privateCreateForm"><label>NOME DA SALA</label><input id="roomNameInput" maxlength="30" placeholder="Ex.: Corrida do Velho"><label>SENHA DA SALA</label><input id="roomPasswordInput" type="password" maxlength="64" placeholder="Mínimo 4 caracteres"><p class="modal-muted">O código é gerado automaticamente e tem no máximo 15 caracteres.</p><button id="privateCreateBtn" class="primary">CRIAR E ABRIR SALA</button></div><div id="privateJoinForm" class="hidden"><label>CÓDIGO DA SALA</label><input id="roomCodeInput" maxlength="15" placeholder="Até 15 caracteres" autocomplete="off"><label>SENHA DA SALA</label><input id="roomJoinPassword" type="password" maxlength="64" placeholder="Senha"><button id="privateJoinBtn" class="primary">ENTRAR NA SALA</button></div><div id="privateMsg"></div></div></section>
-<section id="overlayPanel" class="modal hidden">
- <div class="modal-card"><button class="modal-close" id="modalClose">×</button><div id="modalContent"></div></div>
-</section>
-</div>
-<script type="module" src="app.js"></script>
+    <section id="loading" class="screen hidden loading-screen">
+      <video id="loadingVideo" class="loading-video" muted loop playsinline preload="metadata" poster="loading-hero.webp"><source src="loading-cinematic.mp4" type="video/mp4"></video><div class="loading-overlay"></div><div class="loading-shell"><div class="loading-scene" id="loadingScene"></div><span class="eyebrow" id="loadingWorld">MUNDO 01</span><div class="loading-title" id="loadingTitle">NEON APEX</div><div class="loading-sub" id="loadingSub">SINCRONIZANDO PILOTOS...</div><div class="load-bar"><i id="loadFill"></i></div><div class="loading-meta"><span id="loadingPercent">0%</span><div class="load-tip" id="loadTip">DICA: solte o drift no brilho máximo.</div></div></div>
+    </section>
 
-<div id="bugRecovery" class="bug-recovery hidden" role="dialog" aria-live="assertive">
- <div class="bug-recovery-card"><button id="bugRecoveryClose" class="bug-recovery-close" aria-label="Fechar">×</button><div class="bug-recovery-icon">⚠</div><h2 id="bugRecoveryTitle">ERRO RECUPERADO</h2><p id="bugRecoveryText">O jogo encontrou um problema e está se recuperando.</p><small id="bugRecoveryTimer">Fechando em 15s...</small></div>
-</div>
-<div id="ceoPanel" class="ceo-panel hidden" role="dialog">
- <div class="ceo-panel-card"><div class="ceo-panel-head"><div><small>CENTRAL TÉCNICA</small><h2>RELATÓRIO DE BUGS</h2></div><button id="ceoClose">×</button></div><button id="ceoRefresh" class="secondary-btn">ATUALIZAR</button><div id="ceoReports" class="ceo-reports"><div class="ceo-empty">Carregando...</div></div></div>
-</div>
-</body></html>
+    <section id="game" class="hidden" aria-label="Corrida">
+      <canvas id="scene"></canvas><div class="race-vignette"></div><div class="speed-lines" id="speedLines"></div>
+      <div class="race-hud"><div class="race-top"><div class="brand">NEON<span>PATH</span></div><div id="lap">VOLTA 1/3</div><div id="timer">00:00</div></div><div id="score" class="score"></div><div class="race-position"><b id="racePosition">1</b><span>/8</span></div><div class="countdown hidden" id="countdown">3</div><div class="speed-box"><b id="speed">000</b><small>KM/H</small></div><div class="mini"><canvas id="map" width="180" height="100"></canvas></div><div class="energy"><span>TURBO</span><div><i id="bar"></i></div><small id="driftStatus">SHIFT / ESPAÇO</small></div><div class="lap-progress"><i id="raceProgress"></i></div><div class="actions"><button id="turbo" type="button">TURBO</button><button id="sab" class="item-empty" type="button">ITEM</button></div><div class="touch-controls"><button id="touchLeft" class="steer-btn" type="button" aria-label="Virar para esquerda">◀</button><button id="touchDrift" type="button" aria-label="Derrapar">DRIFT</button><button id="touchRight" class="steer-btn" type="button" aria-label="Virar para direita">▶</button></div><div class="touch-drive"><button id="touchBrake" type="button" aria-label="Freio">FREIO</button><button id="touchAccelerate" type="button" aria-label="Acelerar">ACELERAR</button></div><div class="touch-actions"><button id="touchTurbo" type="button">TURBO</button><button id="touchItem" class="item-empty" type="button">ITEM</button></div><button id="raceAudio" class="race-audio" type="button" aria-label="Alternar áudio">♪</button><button id="racePause" class="race-pause" type="button" aria-label="Pausar">Ⅱ</button><button id="raceExit" class="race-exit" type="button" aria-label="Sair da corrida">SAIR</button></div>
+    </section>
+
+    <section id="finish" class="screen hidden finish-screen"><div class="finish-shell"><div class="finish-kicker">CORRIDA ENCERRADA</div><h1>LINHA DE <em>CHEGADA</em></h1><div id="podium" class="podium"></div><div id="rewards" class="rewards"></div><div class="finish-actions"><button id="nextRace" class="ready-btn" type="button">VOLTAR AO PADDOCK</button><button id="raceAgain" type="button">CORRER NOVAMENTE</button></div></div></section>
+
+    <section id="modePanel" class="modal hidden" aria-labelledby="modeTitle"><div class="modal-card mode-card"><button class="modal-close" id="modeClose" type="button" aria-label="Fechar">×</button><span class="eyebrow">ESCOLHA A EXPERIÊNCIA</span><h2 id="modeTitle">COMO VOCÊ VAI CORRER?</h2><p class="modal-muted">Todas as corridas usam o mesmo motor e a mesma progressão.</p><div class="mode-grid"><button id="modeSolo" class="mode-option" type="button"><i>01</i><b>SOLO</b><small>Você contra sete rivais ajustados ao seu nível.</small><span>IMEDIATO</span></button><button id="modeOnline" class="mode-option featured" type="button"><i>02</i><b>ONLINE RÁPIDO</b><small>Encontre uma sala pública e dispute o rank.</small><span>RECOMENDADO</span></button><button id="modePrivate" class="mode-option" type="button"><i>03</i><b>CRIAR SALA</b><small>Nome, senha e convite para os amigos.</small><span>PRIVADA</span></button><button id="modeJoin" class="mode-option" type="button"><i>04</i><b>ENTRAR COM CÓDIGO</b><small>Use o código e a senha recebidos.</small><span>CONVITE</span></button></div></div></section>
+    <section id="privatePanel" class="modal hidden"><div class="modal-card"><button class="modal-close" id="privateClose" type="button" aria-label="Fechar">×</button><span class="eyebrow">SALA PERSONALIZADA</span><h2 id="privateTitle">SALA PRIVADA</h2><div class="private-tabs"><button id="privateCreateTab" class="active" type="button">CRIAR</button><button id="privateJoinTab" type="button">ENTRAR</button></div><div id="privateCreateForm"><label for="roomNameInput">NOME DA SALA</label><input id="roomNameInput" maxlength="30" placeholder="Ex.: Corrida do Velho"><label for="roomPasswordInput">SENHA DA SALA</label><input id="roomPasswordInput" type="password" maxlength="64" placeholder="Mínimo 4 caracteres"><p class="modal-muted">O código é gerado automaticamente e tem no máximo 15 caracteres.</p><button id="privateCreateBtn" class="primary" type="button">CRIAR SALA</button></div><div id="privateJoinForm" class="hidden"><label for="roomCodeInput">CÓDIGO DA SALA</label><input id="roomCodeInput" maxlength="15" placeholder="Até 15 caracteres" autocomplete="off"><label for="roomJoinPassword">SENHA DA SALA</label><input id="roomJoinPassword" type="password" maxlength="64" placeholder="Senha"><button id="privateJoinBtn" class="primary" type="button">ENTRAR NA SALA</button></div><div id="privateMsg" class="form-message" aria-live="polite"></div></div></section>
+    <section id="pausePanel" class="modal hidden"><div class="modal-card pause-card"><span class="eyebrow">CORRIDA EM ANDAMENTO</span><h2>PAUSA LOCAL</h2><p>A corrida online continua no servidor.</p><button id="resumeRace" class="primary" type="button">VOLTAR À PISTA</button><button id="pauseSettings" type="button">AJUSTES RÁPIDOS</button><button id="pauseExit" class="danger" type="button">ABANDONAR CORRIDA</button></div></section>
+    <section id="overlayPanel" class="modal hidden"><div class="modal-card overlay-card"><button class="modal-close" id="modalClose" type="button" aria-label="Fechar">×</button><div id="modalContent"></div></div></section>
+  </main>
+
+  <div id="toast" class="toast hidden" role="status" aria-live="polite"></div>
+  <div id="bugRecovery" class="bug-recovery hidden"><div class="bug-recovery-card"><button id="bugRecoveryClose" type="button" aria-label="Fechar">×</button><span class="eyebrow">SISTEMA DE SEGURANÇA</span><h2 id="bugRecoveryTitle">RECUPERANDO</h2><p id="bugRecoveryText">O jogo encontrou uma falha e está se recuperando.</p><small id="bugRecoveryTimer">Fechando em 15s...</small></div></div>
+  <section id="ceoPanel" class="modal hidden"><div class="modal-card ceo-card"><button class="modal-close" id="ceoClose" type="button">×</button><span class="eyebrow">OPERAÇÃO</span><h2>CENTRAL CEO</h2><button id="ceoRefresh" class="secondary-btn" type="button">ATUALIZAR RELATÓRIOS</button><div id="ceoReports"></div></div></section>
+  <audio id="soundtrack" src="velocity-protocol.mp3" loop preload="none"></audio>
+  <script type="module" src="app.js"></script>
+</body>
+</html>

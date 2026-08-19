@@ -1,87 +1,71 @@
 'use strict';
+
 const assert=require('assert');
 const fs=require('fs');
-const core=require('./game-core');
+const path=require('path');
+const {spawnSync}=require('child_process');
 const root=__dirname;
-const html=fs.readFileSync(root+'/index.html','utf8');
-const app=fs.readFileSync(root+'/app.js','utf8');
-const server=fs.readFileSync(root+'/server.js','utf8');
+const read=name=>fs.readFileSync(path.join(root,name),'utf8');
+const html=read('index.html'),css=read('style.css'),app=read('app.js'),sw=read('service-worker.js');
+const manifest=JSON.parse(read('assets-manifest.json'));
+const pwa=JSON.parse(read('manifest.webmanifest'));
 
-// 1) Interface contracts
-for(const id of ['authPanel','loginForm','registerForm','authNick','authPassword','registerNick','registerPassword','registerEmail','loginBtn','registerBtn','toRegister','toLogin','nick','create','join','rank','room','roomKey','quality','logout','start','turbo','sab']){
-  assert(html.includes(`id="${id}"`),`missing button/input: ${id}`);
-}
-assert(html.includes('maxlength="15"'));
-assert(app.includes("$('join').onclick"));
-assert(app.includes("$('create').onclick"));
-assert(app.includes("$('rank').onclick"));
-assert(app.includes("$('turbo').onclick"));
-assert(app.includes("$('sab').onclick"));
-
-// 2) Room code and CEO access
-assert(core.isRoomCodeLengthValid('Velho202026'));
-assert.strictEqual(core.normalizeRoomCode(' velho202026 '),'VELHO202026');
-assert(!core.isRoomCodeLengthValid('1234567890123456'));
-assert(server.includes("const CEO_ROOM_CODE = 'VELHO202026'"));
-assert(server.includes("const CEO_KEY = process.env.CEO_ROOM_KEY || 'Velho202026'"));
-assert(server.includes('ensureCeoRoom()'));
-assert(server.includes('r.ceo||r.players.size>=1'));
-
-// 3) Security / bad-faith input tests
-assert.strictEqual(core.cleanNick('<script>alert(1)</script>'),null);
-assert.strictEqual(core.sanitizeInput({type:'../../server'}),null);
-assert.strictEqual(core.sanitizeInput({type:'left'}),'left');
-const room={running:true,started:Date.now()-5000,players:new Map()};
-const p=Object.assign(core.spawn(0),{id:'attacker',nickname:'Tester'});room.players.set(p.id,p);
-for(let i=0;i<100;i++) core.applyInput(p,'left',Date.now(),room);
-assert(p.suspiciousInputs>0,'input flood was not detected');
-assert(p.a<=Math.PI*2 && p.a>=-Math.PI*2,'angle exploded');
-
-// 4) Server-authoritative movement: client cannot submit x/y through input.
-assert(!server.includes("p.x=m.x") && !server.includes("p.y=m.y"));
-assert(server.includes('core.stepPlayer'));
-assert(server.includes('core.collision'));
-
-// 5) Sabotage abuse tests: cooldown + range/front targeting.
-const attacker=Object.assign(core.spawn(0),{id:'a',nickname:'A'});
-const target=Object.assign(core.spawn(1),{id:'b',nickname:'B'});
-attacker.x=50;attacker.y=40;attacker.a=0;target.x=58;target.y=40;
-const rr={running:true,started:Date.now()-10000,players:new Map([['a',attacker],['b',target]])};
-let r=core.applyInput(attacker,'sabotage',Date.now(),rr);assert(r.accepted&&r.sabotage);
-assert(!core.applyInput(attacker,'sabotage',Date.now()+1000,rr).accepted,'sabotage cooldown bypassed');
-assert(core.chooseSabotageTarget(attacker,rr)===target);
-
-// 6) Simulate 100 complete QA matches with 8 players and hostile input spam.
-for(let match=1;match<=100;match++){
-  const r={running:true,started:Date.now()-match*10,players:new Map()};
-  for(let i=0;i<8;i++){
-    const q=Object.assign(core.spawn(i),{id:`m${match}-p${i}`,nickname:`P${i}`});r.players.set(q.id,q);
-  }
-  for(let tick=0;tick<180;tick++){
-    const now=Date.now()+tick*34;
-    for(const q of r.players.values()){
-      const type=tick%37===0?'sabotage':tick%13===0?'turbo':tick%2?'right':'left';
-      core.applyInput(q,type,now,r);
-      // hostile payloads are ignored by sanitizeInput
-      if(tick%17===0) assert.strictEqual(core.sanitizeInput({type:'setPosition',x:999999,y:-999999}),null);
-      core.stepPlayer(q,r,core.TICK_MS/1000,now);
-      if(core.collision(q,r))q.alive=false;
-    }
-  }
-  assert.strictEqual(r.players.size,8);
+// Sintaxe de todos os scripts executáveis.
+for(const file of ['app.js','server.js','game-core.js','service-worker.js']){
+  const result=spawnSync(process.execPath,['--check',file],{cwd:root,encoding:'utf8'});
+  assert.strictEqual(result.status,0,`${file}: ${result.stderr}`);
 }
 
-// 7) Auth flow contract and optional email
-assert(server.includes("req.body?.email"));
-assert(server.includes('email_invalido'));
-assert(server.includes('login_invalido'));
-assert(server.includes('bcrypt.compare'));
-assert(server.includes('JWT_SECRET'));
-assert(server.includes('server_awards_only'));
+// Três famílias de viewport + controles de toque grandes e retrato funcional.
+for(const contract of ['@media(max-width:1100px)','@media(max-width:820px)','@media(max-width:520px)','@media(pointer:coarse)','orientation:landscape','orientation:portrait','prefers-reduced-motion:reduce'])assert(css.includes(contract),`CSS responsivo ausente: ${contract}`);
+const portrait=css.slice(css.indexOf('@media(pointer:coarse) and (orientation:portrait)'),css.indexOf('@media(max-width:520px)'));
+assert(portrait.includes('width:72px;height:72px'),'alvos de toque em retrato ficaram pequenos');
+assert(!/body\s*\{[^}]*display\s*:\s*none/.test(portrait),'o jogo desaparece em retrato');
+assert(css.includes('safe-area-inset-bottom'),'safe area de celular ausente');
+assert(css.includes('overscroll-behavior:none'),'gesto da página pode disputar com a corrida');
+assert(html.includes('viewport-fit=cover'),'viewport sem suporte a notch');
+assert(html.includes('Continuar em retrato'),'orientação virou bloqueio obrigatório');
+assert(app.includes('DEVICE_LOW'),'detecção de aparelho fraco ausente');
+assert(app.includes('fps<29'),'fallback automático de FPS ausente');
 
-console.log('NEON PATH 7.0 QA: PASS');
-console.log('100 partidas simuladas: PASS');
-console.log('Anti-spam/anti-payload: PASS');
-console.log('Sala CEO + código <=15: PASS');
-console.log('Login/cadastro/e-mail opcional: PASS');
-console.log('Botões essenciais: PASS');
+// O pacote Essencial respeita o orçamento de 3 MiB; o HD permanece opcional.
+const liteBytes=manifest.packs.lite.reduce((sum,file)=>sum+fs.statSync(path.join(root,file)).size,0);
+assert(liteBytes<=3*1024*1024,`pacote essencial passou de 3 MiB: ${liteBytes}`);
+const shell=['index.html','style.css','app.js','config.js','loading-hero.webp','prestige-emblem.webp','1-spark.svg'];
+const shellBytes=shell.reduce((sum,file)=>sum+fs.statSync(path.join(root,file)).size,0);
+assert(shellBytes<=450*1024,`shell inicial passou de 450 KiB: ${shellBytes}`);
+assert(sw.includes("request.headers.has('range')"),'service worker intercepta Range de vídeo');
+assert(sw.includes("/api/")&&sw.includes("/socket.io/"),'service worker pode cachear dados vivos');
+assert(sw.includes('neon-path-shell-v12')&&sw.includes('neon-path-resources-v12'),'versões de cache inconsistentes');
+
+// PWA instalável e sem orientação forçada.
+assert.strictEqual(pwa.display,'fullscreen');
+assert.strictEqual(pwa.orientation,'any');
+assert.strictEqual(pwa.lang,'pt-BR');
+assert(Array.isArray(pwa.icons)&&pwa.icons.length>0);
+assert(html.includes('rel="manifest" href="manifest.webmanifest"'));
+
+function probe(file){
+  const result=spawnSync('ffprobe',['-v','error','-show_entries','format=duration:stream=codec_name,width,height','-of','json',file],{cwd:root,encoding:'utf8'});
+  assert.strictEqual(result.status,0,`ffprobe falhou em ${file}: ${result.stderr}`);return JSON.parse(result.stdout);
+}
+const video=probe('loading-cinematic.mp4'),videoStream=video.streams.find(x=>x.codec_name==='h264');
+assert(videoStream,'cinemática não está em H.264');
+assert.strictEqual(videoStream.width,1280);assert.strictEqual(videoStream.height,720);
+assert(Number(video.format.duration)>=8&&Number(video.format.duration)<=10,'duração inesperada da cinemática');
+const music=probe('velocity-protocol.mp3');
+assert(music.streams.some(x=>x.codec_name==='mp3'),'trilha não está em MP3');
+assert(Number(music.format.duration)>=28&&Number(music.format.duration)<=31,'duração inesperada da trilha');
+assert(fs.statSync(path.join(root,'loading-cinematic.mp4')).size<1.5*1024*1024,'MP4 pesado demais');
+assert(fs.statSync(path.join(root,'velocity-protocol.mp3')).size<600*1024,'trilha pesada demais');
+
+// Fontes locais referenciadas por HTML/CSS precisam existir (rotas dinâmicas são ignoradas).
+const refs=new Set();
+for(const m of html.matchAll(/(?:src|href)=["']([^"'#?]+)["']/g))refs.add(m[1]);
+for(const m of css.matchAll(/url\(["']?([^"')]+)["']?\)/g))refs.add(m[1]);
+for(const ref of refs){
+  if(ref.startsWith('http')||ref.startsWith('data:')||ref.startsWith('/socket.io/'))continue;
+  const local=ref.replace(/^\//,'');assert(fs.existsSync(path.join(root,local)),`referência quebrada: ${ref}`);
+}
+
+console.log(`NEON PATH 12.0.1 QA VISUAL: PASS · shell ${(shellBytes/1024).toFixed(0)} KiB · essencial ${(liteBytes/1048576).toFixed(2)} MiB · MP4 ${Number(video.format.duration).toFixed(1)}s`);
