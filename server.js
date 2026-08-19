@@ -136,6 +136,22 @@ async function initDatabase() {
       equipped BOOLEAN NOT NULL DEFAULT FALSE,
       PRIMARY KEY(user_id, item_id)
     );
+    CREATE TABLE IF NOT EXISTS bug_reports (
+      id BIGSERIAL PRIMARY KEY,
+      user_id BIGINT NULL REFERENCES users(id) ON DELETE SET NULL,
+      nickname VARCHAR(20),
+      fingerprint VARCHAR(80) NOT NULL,
+      message VARCHAR(1000) NOT NULL,
+      stack TEXT,
+      source VARCHAR(80),
+      screen VARCHAR(80),
+      track VARCHAR(80),
+      mode VARCHAR(40),
+      resolved BOOLEAN NOT NULL DEFAULT FALSE,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      resolved_at TIMESTAMPTZ
+    );
+    CREATE INDEX IF NOT EXISTS idx_bug_reports_open ON bug_reports(resolved,created_at DESC);
     CREATE INDEX IF NOT EXISTS idx_users_ph ON users(ph DESC);
     CREATE INDEX IF NOT EXISTS idx_profiles_prestige ON player_profiles(prestige DESC, level DESC, xp DESC);
   `);
@@ -156,7 +172,7 @@ async function getProfile(userId) {
   return { ...p, characters: chars };
 }
 
-const CHARACTER_IDS = [1,2,3,4,5,6];
+const CHARACTER_IDS = [1,2,3,4,5,6,7,8];
 const STORE_CATALOG = [
   { code:'crown_royal', name:'Coroa Imperial Neon', type:'crown', price:0, rarity:'legendary', data:{glow:'#ffd84a', aura:'gold'} },
   { code:'crown_cyber', name:'Coroa Cyber Real', type:'crown', price:4200, rarity:'epic', data:{glow:'#00f6ff', aura:'cyan'} },
@@ -176,6 +192,29 @@ async function ensureStore() {
       [it.code,it.name,it.type,it.price,it.rarity,it.data]);
   }
 }
+
+app.post('/api/bug-report', async (req,res)=>{
+  const u=authUser(req);
+  const b=req.body||{};
+  const fingerprint=String(b.fingerprint||'unknown').slice(0,80), message=String(b.message||'Erro desconhecido').slice(0,1000);
+  if(!db)return res.json({ok:true,stored:false});
+  try{
+    await db.query(`INSERT INTO bug_reports(user_id,nickname,fingerprint,message,stack,source,screen,track,mode) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9)`,[u?.id||null,String(u?.nickname||'Piloto').slice(0,20),fingerprint,message,String(b.stack||'').slice(0,12000),String(b.source||'client').slice(0,80),String(b.screen||'unknown').slice(0,80),String(b.track||'unknown').slice(0,80),String(b.mode||'unknown').slice(0,40)]);
+    res.json({ok:true,stored:true});
+  }catch(e){console.error('bug-report:',e.message);res.json({ok:true,stored:false});}
+});
+function ceoAuthorized(req){return !!CEO_KEY && String(req.headers['x-ceo-key']||'')===String(CEO_KEY);}
+app.get('/api/ceo/bug-reports',async(req,res)=>{
+  if(!ceoAuthorized(req))return res.status(403).json({error:'Acesso CEO negado'});
+  if(!db)return res.json({reports:[]});
+  try{const q=await db.query(`SELECT id,nickname,fingerprint,message,stack,source,screen,track,mode,resolved,created_at AS "createdAt" FROM bug_reports ORDER BY resolved ASC,created_at DESC LIMIT 200`);res.json({reports:q.rows});}catch(e){res.status(500).json({error:'bug_reports_error'});}
+});
+app.post('/api/ceo/bug-reports/:id/resolve',async(req,res)=>{
+  if(!ceoAuthorized(req))return res.status(403).json({error:'Acesso CEO negado'});
+  if(!db)return res.json({ok:true});
+  const id=Number(req.params.id);if(!Number.isInteger(id)||id<1)return res.status(400).json({error:'invalid_id'});
+  await db.query('UPDATE bug_reports SET resolved=TRUE,resolved_at=NOW() WHERE id=$1',[id]);res.json({ok:true});
+});
 
 app.get('/health', async (_req, res) => {
   let database = 'disabled';
@@ -423,10 +462,10 @@ io.on('connection',s=>{
       p.energy-=30;p.lastSab=now;
       let target=null,best=999;
       for(const q of r.players.values())if(q.alive&&q.id!==p.id){
-        const d=Math.abs(q.progress-p.progress);
-        if(d<best){best=d;target=q;}
+        const ahead=((q.progress-p.progress)+1)%1;
+        if(ahead>0 && ahead<best){best=ahead;target=q;}
       }
-      if(target&&best<.025){target.speed*=.72;target.boost=.15;s.to(r.code).emit('hit',{from:p.nickname,to:target.nickname});}
+      if(target&&best<.075){target.speed*=.58;target.boost=.10;target.hitTimer=.85;s.to(r.code).emit('hit',{from:p.nickname,to:target.nickname});}
     }
     p.lastInput=now;
   });
@@ -464,7 +503,8 @@ setInterval(()=>{
       const offroad=Math.abs(p.lane)>5.7;
       const driftBonus=p.driftLevel>=2?1.8:p.driftLevel>=1?.8:0;
       const throttleFactor=p.bot?1:(p.throttle?1:(p.brake?.18:.58));
-      const target=((p.bot?13.7*p.botSkill:13.5)*rubber+(p.boost>0?7.5:0)+driftBonus)*throttleFactor;
+      const hitPenalty=p.hitTimer>0?.55:1;
+      const target=((p.bot?13.7*p.botSkill:13.5)*rubber+(p.boost>0?7.5:0)+driftBonus)*throttleFactor*hitPenalty;
       if(offroad)p.speed*=.92;
       p.speed+=(target-p.speed)*.12;
       p.lane+=p.steer*dt*8;
@@ -477,7 +517,7 @@ setInterval(()=>{
       }
       const cp=Math.min(3,Math.floor(p.progress*4));
       if(cp>=p.checkpoint)p.checkpoint=cp;
-      p.energy=Math.min(100,p.energy+5*dt);p.boost=Math.max(0,p.boost-dt);p.boostTimer=Math.max(0,p.boostTimer-dt);if(p.boostTimer>0)p.boost=Math.max(p.boost,1.1);
+      p.energy=Math.min(100,p.energy+5*dt);p.boost=Math.max(0,p.boost-dt);p.hitTimer=Math.max(0,(p.hitTimer||0)-dt);p.boostTimer=Math.max(0,p.boostTimer-dt);if(p.boostTimer>0)p.boost=Math.max(p.boost,1.1);
       const q=posFor(p,t);p.trail.push([+q.x.toFixed(2),+q.z.toFixed(2)]);if(p.trail.length>80)p.trail.shift();
     }
     io.to(r.code).emit('state',snap(r));

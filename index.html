@@ -13,7 +13,7 @@
 <script type="importmap">{"imports":{"three":"https://cdn.jsdelivr.net/npm/three@0.178.0/build/three.module.js"}}</script>
 </head>
 <body>
-<div id="rotateNotice"><div class="rotate-card"><div class="rotate-icon">↻</div><h2>GIRE O CELULAR</h2><p>NEON PATH RACING foi feito para jogar em <b>paisagem</b>.</p><button id="rotateFullscreen" class="primary" type="button">ATIVAR TELA CHEIA</button></div></div>
+<div id="rotateNotice"><div class="rotate-card"><div class="rotate-icon">↻</div><h2>GIRE O CELULAR</h2><p>NEON PATH RACING foi feito para jogar em <b>paisagem</b>.</p><button id="rotateFullscreen" class="primary" type="button">ATIVAR TELA CHEIA</button><button id="rotateSkip" class="text-btn" type="button">CONTINUAR SEM TELA CHEIA</button></div></div>
 <div id="termsGate" class="gate hidden">
   <div class="gate-card">
     <div class="logo">NEON <span>PATH</span></div><h2>ANTES DE CORRER</h2>
@@ -46,7 +46,7 @@
     </div>
     <div id="authMsg"></div>
   </div>
-  <div class="version">NEON PATH RACING • V9.7 • RECUPERAÇÃO E CONTROLES</div>
+  <div class="version">NEON PATH RACING • V10.0 • PREMIUM RACE ENGINE</div>
 </section>
 
 <div id="app" hidden>
@@ -131,4 +131,11 @@
 </section>
 </div>
 <script type="module" src="app.js"></script>
+
+<div id="bugRecovery" class="bug-recovery hidden" role="dialog" aria-live="assertive">
+ <div class="bug-recovery-card"><button id="bugRecoveryClose" class="bug-recovery-close" aria-label="Fechar">×</button><div class="bug-recovery-icon">⚠</div><h2 id="bugRecoveryTitle">ERRO RECUPERADO</h2><p id="bugRecoveryText">O jogo encontrou um problema e está se recuperando.</p><small id="bugRecoveryTimer">Fechando em 15s...</small></div>
+</div>
+<div id="ceoPanel" class="ceo-panel hidden" role="dialog">
+ <div class="ceo-panel-card"><div class="ceo-panel-head"><div><small>CENTRAL TÉCNICA</small><h2>RELATÓRIO DE BUGS</h2></div><button id="ceoClose">×</button></div><button id="ceoRefresh" class="secondary-btn">ATUALIZAR</button><div id="ceoReports" class="ceo-reports"><div class="ceo-empty">Carregando...</div></div></div>
+</div>
 </body></html>

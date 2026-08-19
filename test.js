@@ -136,7 +136,14 @@ assert(server.includes("x-ceo-key"),'CEO key protection missing');
 assert(app.includes('characterId:selectedCharacter'),'selected character not sent to race');
 assert(server.includes('characterId:p.characterId||1'),'character identity not exposed to HUD safely');
 assert(server.includes('targetLane'),'bot racing-line logic missing');
-console.log('NEON PATH 9.9 QA: OK');
+assert(app.includes('updateAdaptivePerformance'),'adaptive FPS governor missing');
+assert(app.includes('desiredFov'),'speed-sensitive camera FOV missing');
+assert(app.includes('userData.wheels'),'animated wheel rig missing');
+assert(html.includes('id="rotateSkip"'),'fullscreen bypass control missing');
+assert(server.includes('const CHARACTER_IDS = [1,2,3,4,5,6,7,8]'),'all 8 characters must be accepted by profile API');
+assert(server.includes('const ahead=((q.progress-p.progress)+1)%1'),'sabotage target must handle lap wrap-around');
+
+console.log('NEON PATH 10.0 PREMIUM QA: OK');
 console.log(`RACE SIMULATION: ${completed} complete races across 3 modes x 8 maps`);
 console.log('SECURITY SIMULATION: private passwords, owner-only start, hidden AI, input clamping/rate-limit model: OK');
 console.log('MOBILE QA: landscape lock helper + touch steering/turbo/item controls present + WebGL recovery');
